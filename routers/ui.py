@@ -3,7 +3,7 @@ from fastapi.responses import HTMLResponse
 
 router = APIRouter(tags=["ui"])
 
-HTML = """
+HTML = r"""
 <!doctype html>
 <html lang="ko">
 <head>
@@ -174,7 +174,7 @@ HTML = """
       <!-- Left: main flow -->
       <section class="card">
         <div class="hd">
-          <div class="title">Session / Teach / Talk</div>
+          <div class="title">Session / Formation / Talk</div>
           <div class="row">
             <span id="sessionBadge" class="badge mono">session_id: -</span>
             <button class="primary" onclick="startSession()">Start</button>
@@ -186,28 +186,46 @@ HTML = """
           <div class="row">
             <button onclick="checkHealth()">Health</button>
             <button onclick="refreshState()">State</button>
-            <span class="kbd">Tip: Start → Teach → Talk 순서로 누르면 됨</span>
+            <span class="kbd">Tip: Start(이름) → Question → Answer 반복 → chat되면 Talk</span>
           </div>
 
           <div class="sep"></div>
 
           <div class="card" style="box-shadow:none; background: var(--panel2);">
             <div class="hd">
-              <div class="title">Teach (A/B)</div>
+              <div class="title">Session Start</div>
+            </div>
+            <div class="body">
+              <div class="row" style="width:100%">
+                <div style="flex:1; min-width:240px">
+                  <input id="visitorName" placeholder="방문자 이름(닉네임 가능) 입력..." maxlength="100" />
+                </div>
+              </div>
+              <div class="sub" style="margin-top:10px">
+                Start는 <span class="mono">POST /session/start</span>로 <span class="mono">visitor_name</span>을 먼저 입력해줘.
+              </div>
+            </div>
+          </div>
+
+          <div class="sep"></div>
+
+          <div class="card" style="box-shadow:none; background: var(--panel2);">
+            <div class="hd">
+              <div class="title">Formation (A/B)</div>
               <div class="row">
-                <button onclick="getTeachQuestion()">Get question</button>
+                <button onclick="getCurrentQuestion()">Get current question</button>
                 <span id="qBadge" class="badge mono">question_id: -</span>
               </div>
             </div>
             <div class="body">
-              <div id="teachQuestion" class="out muted small">아직 질문 없음</div>
+              <div id="questionBox" class="out muted small">아직 질문 없음</div>
               <div class="sep"></div>
               <div class="two">
-                <button class="primary" onclick="sendTeachAnswer('A')">Choose A</button>
-                <button onclick="sendTeachAnswer('B')">Choose B</button>
+                <button class="primary" onclick="sendAnswer('A')">Choose A</button>
+                <button onclick="sendAnswer('B')">Choose B</button>
               </div>
               <div class="sub" style="margin-top:10px">
-                선택하면 서버가 state를 업데이트하고, 응답 스키마(status/ui_text/stage/values)를 돌려줌.
+                <span class="mono">GET /question/current</span>로 받고, <span class="mono">POST /answer</span>로 저장해.
               </div>
             </div>
           </div>
@@ -223,11 +241,11 @@ HTML = """
               </div>
             </div>
             <div class="body">
-              <textarea id="talkInput" placeholder="여기에 질문 입력... (예: 사노야 너는 누구야?)"></textarea>
+              <textarea id="talkInput" placeholder="여기에 질문 입력... (chat phase에서만 동작)"></textarea>
               <div class="sep"></div>
               <div id="talkOutput" class="out muted small">아직 응답 없음</div>
               <div class="sub" style="margin-top:10px">
-                OpenAI 실패/지연이면 fallback(status=fallback)로 내려옴.
+                formation 단계면 Talk은 사용할 수 없는게 정상(409).
               </div>
             </div>
           </div>
@@ -244,14 +262,19 @@ HTML = """
         </div>
         <div class="body">
           <div class="row">
-            <div class="badge mono">stage: <span id="stageVal">-</span></div>
-            <div class="badge mono">teach_count: <span id="teachCount">-</span></div>
-            <div class="badge mono">talk_count: <span id="talkCount">-</span></div>
+            <div class="badge mono">phase: <span id="phaseVal">-</span></div>
+            <div class="badge mono">current_q: <span id="currentQVal">-</span></div>
+            <div class="badge mono">formed_at: <span id="formedAtVal">-</span></div>
           </div>
           <div class="sep"></div>
           <div class="out mono small" id="log"></div>
           <div class="sub" style="margin-top:12px">
-            엔드포인트가 <span class="mono">/session/start</span>가 아니라 <span class="mono">/start</span>로 되어 있어도 자동으로 fallback 시도함.
+            현재 UI는 새 엔드포인트에 맞춰서 동작함:
+            <span class="mono">/session/start</span>,
+            <span class="mono">/question/current</span>,
+            <span class="mono">/answer</span>,
+            <span class="mono">/state</span>,
+            <span class="mono">/talk</span>
           </div>
         </div>
       </aside>
@@ -266,7 +289,7 @@ HTML = """
   const pill = document.getElementById("healthPill");
   const sessionBadge = document.getElementById("sessionBadge");
   const qBadge = document.getElementById("qBadge");
-  const teachQuestion = document.getElementById("teachQuestion");
+  const questionBox = document.getElementById("questionBox");
   const talkOutput = document.getElementById("talkOutput");
   const logEl = document.getElementById("log");
 
@@ -279,11 +302,10 @@ HTML = """
   function log(obj) {
     const t = new Date().toLocaleTimeString();
     const s = (typeof obj === "string") ? obj : JSON.stringify(obj, null, 2);
-    logEl.textContent = `[${t}] ${s}\\n\\n` + logEl.textContent;
+    logEl.textContent = `[${t}] ${s}\n\n` + logEl.textContent;
   }
 
   function clearLog() { logEl.textContent = ""; }
-
   function startSpin() { spinner.style.display = "inline-block"; }
   function stopSpin() { spinner.style.display = "none"; }
 
@@ -296,24 +318,14 @@ HTML = """
     let data = null;
     try { data = text ? JSON.parse(text) : null; }
     catch { data = { _raw: text }; }
+
     if (!res.ok) {
       const detail = data?.detail || res.statusText || "request failed";
-      throw new Error(`${res.status} ${detail}`);
+      const err = new Error(`${res.status} ${detail}`);
+      err._data = data;
+      throw err;
     }
     return data;
-  }
-
-  async function tryEndpoints(paths, options) {
-    let lastErr = null;
-    for (const p of paths) {
-      try {
-        const data = await fetchJson(p, options);
-        return { path: p, data };
-      } catch (e) {
-        lastErr = e;
-      }
-    }
-    throw lastErr || new Error("No endpoint worked");
   }
 
   async function checkHealth() {
@@ -331,7 +343,7 @@ HTML = """
   }
 
   function setExample() {
-    document.getElementById("talkInput").value = "사노야, 너는 지금 무엇을 배우고 있어?";
+    document.getElementById("talkInput").value = "사노야, 너는 지금 무엇이 되었어?";
   }
 
   function setSession(id) {
@@ -342,26 +354,29 @@ HTML = """
   function setQuestion(id, text) {
     lastQuestionId = id;
     qBadge.textContent = `question_id: ${id ?? "-"}`;
-    teachQuestion.textContent = text || "아직 질문 없음";
+    questionBox.textContent = text || "아직 질문 없음";
   }
 
   function updateStatePanel(st) {
     if (!st) return;
-    document.getElementById("stageVal").textContent = st.stage ?? "-";
-    document.getElementById("teachCount").textContent = st.total_teach_count ?? "-";
-    document.getElementById("talkCount").textContent = st.total_talk_count ?? "-";
+    document.getElementById("phaseVal").textContent = st.phase ?? "-";
+    document.getElementById("currentQVal").textContent = st.current_question ?? "-";
+    document.getElementById("formedAtVal").textContent = st.formed_at ?? "-";
   }
 
   async function startSession() {
+    const name = document.getElementById("visitorName").value.trim();
+    if (!name) return log("visitor_name 비어있음. 이름을 입력해줘.");
+
     startSpin();
     try {
-      const { path, data } = await tryEndpoints(
-        ["/session/start", "/start"],
-        { method: "POST", body: JSON.stringify({}) }
-      );
+      const body = { visitor_name: name };
+      const data = await fetchJson("/session/start", { method: "POST", body: JSON.stringify(body) });
       setSession(data.session_id);
-      log({ endpoint: path, data });
+      log({ endpoint: "/session/start", data });
       await refreshState();
+      // 자동으로 질문도 한번 가져오고 싶으면 아래 주석 해제
+      // await getCurrentQuestion();
     } catch (e) {
       log("startSession error: " + e.message);
     } finally {
@@ -370,15 +385,12 @@ HTML = """
   }
 
   async function endSession() {
-    if (!sessionId) return log("세션 없음. 먼저 Start를 클릭해봐.");
+    if (!sessionId) return log("세션이 없어. 먼저 Start를 클릭해봐.");
     startSpin();
     try {
       const body = { session_id: sessionId, reason: "completed" };
-      const { path, data } = await tryEndpoints(
-        ["/session/end", "/end"],
-        { method: "POST", body: JSON.stringify(body) }
-      );
-      log({ endpoint: path, data });
+      const data = await fetchJson("/session/end", { method: "POST", body: JSON.stringify(body) });
+      log({ endpoint: "/session/end", data });
       setSession(null);
       setQuestion(null, "아직 질문 없음");
       talkOutput.textContent = "아직 응답 없음";
@@ -390,35 +402,45 @@ HTML = """
     }
   }
 
-  async function getTeachQuestion() {
-    if (!sessionId) return log("세션 없음. 먼저 Start를 선택해봐.");
+  async function getCurrentQuestion() {
+    if (!sessionId) return log("세션이 없어. 먼저 Start를 선택해봐.");
     startSpin();
     try {
-      const url1 = `/teach/question?session_id=${encodeURIComponent(sessionId)}`;
-      const data = await fetchJson(url1);
-      const text = `${data.text}\\n\\nA) ${data.a_text}\\nB) ${data.b_text}`;
-      setQuestion(data.question_id, text);
-      log({ endpoint: "/teach/question", data });
+      const data = await fetchJson("/question/current");
+      const text =
+        `${data.question_text}\n\n` +
+        `A) ${data.choice_a}\n` +
+        `B) ${data.choice_b}\n\n` +
+        `axis_key: ${data.axis_key}`;
+      setQuestion(data.id, text);
+      log({ endpoint: "/question/current", data });
     } catch (e) {
-      log("getTeachQuestion error: " + e.message);
+      log("getCurrentQuestion error: " + e.message);
     } finally {
       stopSpin();
     }
   }
 
-  async function sendTeachAnswer(choice) {
-    if (!sessionId) return log("세션 없음. 먼저 Start를 선택해봐.");
-    if (!lastQuestionId) return log("질문 없음. Get question 먼저 눌러줘.");
+  async function sendAnswer(choice) {
+    if (!sessionId) return log("세션이 없어. 먼저 Start를 선택해봐.");
+    if (!lastQuestionId) return log("질문 없음. Get current question 먼저 눌러줘.");
+
     startSpin();
     try {
       const body = { session_id: sessionId, question_id: lastQuestionId, choice };
-      const data = await fetchJson("/teach/answer", { method: "POST", body: JSON.stringify(body) });
-      log({ endpoint: "/teach/answer", data });
-      // 다음 질문 준비용
-      setQuestion(null, "(저장 완료) Get Question을 통해 새 질문을 가져올 수 있어.");
+      const data = await fetchJson("/answer", { method: "POST", body: JSON.stringify(body) });
+      log({ endpoint: "/answer", data });
+
+      // 다음 질문 안내
+      if (data.next_question == null) {
+        setQuestion(null, "(형성 완료) phase가 chat으로 바뀌었을 수 있어. State 확인해봐.");
+      } else {
+        setQuestion(null, `(저장 완료!) 다음 질문: ${data.next_question}. Get current question 눌러서 가져와볼래?`);
+      }
+
       await refreshState();
     } catch (e) {
-      log("sendTeachAnswer error: " + e.message);
+      log("sendAnswer error: " + e.message);
     } finally {
       stopSpin();
     }
@@ -428,6 +450,7 @@ HTML = """
     if (!sessionId) return log("세션 없음. 먼저 Start를 선택해봐.");
     const txt = document.getElementById("talkInput").value.trim();
     if (!txt) return log("talk input 비어있음");
+
     startSpin();
     try {
       const body = { session_id: sessionId, user_text: txt };
@@ -455,8 +478,9 @@ HTML = """
     }
   }
 
-  // 페이지 로드 시 health 한번
+  // 페이지 로드 시 health + state
   checkHealth();
+  refreshState();
 </script>
 
 </body>
