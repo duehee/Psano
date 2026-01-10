@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 import time
+
+from __future__ import annotations
 from threading import RLock
 from typing import Dict, Any
 

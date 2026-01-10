@@ -1,4 +1,3 @@
-# app/schemas/session.py
 from pydantic import BaseModel, Field
 from .common import Phase
 

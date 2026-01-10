@@ -1,4 +1,3 @@
-# app/schemas/talk.py
 from pydantic import BaseModel, Field
 from .common import Status
 

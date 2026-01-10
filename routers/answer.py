@@ -1,4 +1,3 @@
-# routers/answer.py
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import text
@@ -12,10 +11,8 @@ MAX_QUESTIONS = 380
 
 @router.post("", response_model=AnswerResponse)
 def submit_answer(req: AnswerRequest, db: Session = Depends(get_db)):
-    # req.choice 는 보통 Enum이면 .value / str이면 그대로 쓰면 됨
     choice_val = getattr(req.choice, "value", req.choice)
 
-    # 트랜잭션으로 묶어야 "현재 질문"이 꼬이지 않음
     try:
         with db.begin():
             # 1) 현재 상태 읽기
@@ -124,7 +121,6 @@ def submit_answer(req: AnswerRequest, db: Session = Depends(get_db)):
             return {"saved": True, "next_question": next_q}
 
     except HTTPException:
-        # FastAPI용 예외는 그대로 던지고
         raise
     except Exception as e:
         # 그 외는 500

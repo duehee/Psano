@@ -27,10 +27,6 @@ def _iso(dt):
         return str(dt)
 
 def ensure_psano_state_row(db: Session):
-    """
-    psano_state에 id=1 row 없으면 만들어 둠.
-    ⚠️ 여기선 commit 안 함(호출한 endpoint에서 commit/rollback 관리)
-    """
     row = db.execute(text("SELECT id FROM psano_state WHERE id=1")).mappings().first()
     if row:
         return
@@ -43,7 +39,6 @@ def ensure_psano_state_row(db: Session):
     )
 
 def now_kst():
-    # DB에 "그냥 KST로 박겠다"면 이걸로 넣으면 됨
     return datetime.utcnow() + timedelta(hours=9)
 
 @router.get("/sessions", response_model=AdminSessionsResponse)
