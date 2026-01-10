@@ -153,6 +153,21 @@ HTML = r"""
       display:none;
     }
     @keyframes rot { to { transform: rotate(360deg); } }
+
+    /* ✅ admin sessions table 느낌 */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+    th, td {
+      border-bottom: 1px solid rgba(255,255,255,0.10);
+      padding: 8px 6px;
+      vertical-align: top;
+    }
+    th { color: rgba(255,255,255,0.75); font-weight: 600; text-align: left; }
+    td { color: rgba(255,255,255,0.82); }
+    .right { text-align:right; }
   </style>
 </head>
 
@@ -249,6 +264,47 @@ HTML = r"""
               </div>
             </div>
           </div>
+
+          <!-- ✅✅✅ 추가: Admin(운영자) 패널 -->
+          <div class="sep"></div>
+
+          <div class="card" style="box-shadow:none; background: var(--panel2);">
+            <div class="hd">
+              <div class="title">Admin</div>
+              <div class="row">
+                <button onclick="fetchAdminProgress()">Progress</button>
+                <button onclick="fetchAdminSessions()">Sessions</button>
+                <button class="ghost" onclick="refreshAdminAll()">Refresh all</button>
+              </div>
+            </div>
+            <div class="body">
+              <div class="row">
+                <div class="badge mono">answered: <span id="admAnswered">-</span>/<span id="admMax">-</span></div>
+                <div class="badge mono">ratio: <span id="admRatio">-</span></div>
+                <div class="badge mono">phase: <span id="admPhase">-</span></div>
+                <div class="badge mono">current_q: <span id="admCurrentQ">-</span></div>
+              </div>
+
+              <div class="sep"></div>
+
+              <div class="row" style="width:100%">
+                <div style="flex:1; min-width: 220px;">
+                  <div class="muted small">최근 세션</div>
+                </div>
+                <div class="row">
+                  <span class="kbd">limit</span>
+                  <input id="admLimit" value="20" style="width:80px" />
+                  <span class="kbd">offset</span>
+                  <input id="admOffset" value="0" style="width:80px" />
+                </div>
+              </div>
+
+              <div class="sep"></div>
+
+              <div class="out mono small" id="admSessionsBox">(아직 불러오지 않음)</div>
+            </div>
+          </div>
+          <!-- ✅✅✅ 추가 끝 -->
         </div>
       </section>
 
@@ -274,7 +330,9 @@ HTML = r"""
             <span class="mono">/question/current</span>,
             <span class="mono">/answer</span>,
             <span class="mono">/state</span>,
-            <span class="mono">/talk</span>
+            <span class="mono">/talk</span>,
+            <span class="mono">/admin/progress</span>,
+            <span class="mono">/admin/sessions</span>
           </div>
         </div>
       </aside>
@@ -292,6 +350,14 @@ HTML = r"""
   const questionBox = document.getElementById("questionBox");
   const talkOutput = document.getElementById("talkOutput");
   const logEl = document.getElementById("log");
+
+  // ✅ admin el
+  const admAnswered = document.getElementById("admAnswered");
+  const admMax = document.getElementById("admMax");
+  const admRatio = document.getElementById("admRatio");
+  const admPhase = document.getElementById("admPhase");
+  const admCurrentQ = document.getElementById("admCurrentQ");
+  const admSessionsBox = document.getElementById("admSessionsBox");
 
   function setPill(state, text) {
     pill.classList.remove("status-ok", "status-warn", "status-bad");
@@ -375,8 +441,6 @@ HTML = r"""
       setSession(data.session_id);
       log({ endpoint: "/session/start", data });
       await refreshState();
-      // 자동으로 질문도 한번 가져오고 싶으면 아래 주석 해제
-      // await getCurrentQuestion();
     } catch (e) {
       log("startSession error: " + e.message);
     } finally {
@@ -431,7 +495,6 @@ HTML = r"""
       const data = await fetchJson("/answer", { method: "POST", body: JSON.stringify(body) });
       log({ endpoint: "/answer", data });
 
-      // 다음 질문 안내
       if (data.next_question == null) {
         setQuestion(null, "(형성 완료) phase가 chat으로 바뀌었을 수 있어. State 확인해봐.");
       } else {
@@ -439,6 +502,8 @@ HTML = r"""
       }
 
       await refreshState();
+      // ✅ 운영자 패널도 같이 갱신
+      await fetchAdminProgress();
     } catch (e) {
       log("sendAnswer error: " + e.message);
     } finally {
@@ -478,9 +543,81 @@ HTML = r"""
     }
   }
 
-  // 페이지 로드 시 health + state
+  // ✅✅✅ Admin API 호출들
+  function _pct(x) {
+    if (x == null || isNaN(x)) return "-";
+    return `${Math.round(x * 1000) / 10}%`;
+  }
+
+  async function fetchAdminProgress() {
+    startSpin();
+    try {
+      const data = await fetchJson("/admin/progress");
+      admAnswered.textContent = data.answered_count ?? "-";
+      admMax.textContent = data.max_questions ?? "-";
+      admRatio.textContent = _pct(data.progress_ratio);
+      admPhase.textContent = data.phase ?? "-";
+      admCurrentQ.textContent = data.current_question ?? "-";
+      log({ endpoint: "/admin/progress", data });
+    } catch (e) {
+      log("fetchAdminProgress error: " + e.message);
+    } finally {
+      stopSpin();
+    }
+  }
+
+  function renderSessionsTable(resp) {
+    const sessions = resp?.sessions || [];
+    if (!sessions.length) return "(세션 없음)";
+
+    let html = "<table>";
+    html += "<thead><tr>";
+    html += "<th class='right'>id</th>";
+    html += "<th>name</th>";
+    html += "<th>started</th>";
+    html += "<th>ended</th>";
+    html += "<th>reason</th>";
+    html += "</tr></thead><tbody>";
+
+    for (const s of sessions) {
+      html += "<tr>";
+      html += `<td class='right'>${s.id ?? ""}</td>`;
+      html += `<td>${(s.visitor_name ?? "").toString().replaceAll("<","&lt;")}</td>`;
+      html += `<td>${s.started_at ?? ""}</td>`;
+      html += `<td>${s.ended_at ?? ""}</td>`;
+      html += `<td>${s.end_reason ?? ""}</td>`;
+      html += "</tr>";
+    }
+
+    html += "</tbody></table>";
+    return html;
+  }
+
+  async function fetchAdminSessions() {
+    startSpin();
+    try {
+      const limit = parseInt(document.getElementById("admLimit").value || "20", 10);
+      const offset = parseInt(document.getElementById("admOffset").value || "0", 10);
+      const data = await fetchJson(`/admin/sessions?limit=${encodeURIComponent(limit)}&offset=${encodeURIComponent(offset)}`);
+      admSessionsBox.innerHTML = renderSessionsTable(data);
+      log({ endpoint: "/admin/sessions", data: { total: data.total, shown: (data.sessions||[]).length } });
+    } catch (e) {
+      admSessionsBox.textContent = "(불러오기 실패)";
+      log("fetchAdminSessions error: " + e.message);
+    } finally {
+      stopSpin();
+    }
+  }
+
+  async function refreshAdminAll() {
+    await fetchAdminProgress();
+    await fetchAdminSessions();
+  }
+
+  // 페이지 로드 시 health + state + admin progress(가볍게)
   checkHealth();
   refreshState();
+  fetchAdminProgress();
 </script>
 
 </body>

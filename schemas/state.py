@@ -1,8 +1,8 @@
-# app/schemas/state.py
+# app/schemas/psano_state.py
 from pydantic import BaseModel
-from .common import Phase
+from typing import Optional, Literal
 
 class StateResponse(BaseModel):
-    phase: Phase
+    phase: Literal["formation", "chat"]
     current_question: int
-    formed_at: str | None = None  # 간단히 string(ISO)로
+    formed_at: Optional[str] = None  # ISO string

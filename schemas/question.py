@@ -1,10 +1,11 @@
-# app/schemas/question.py
-from pydantic import BaseModel, Field
+# schemas/question.py
+from pydantic import BaseModel
+from typing import Optional
 
 class QuestionResponse(BaseModel):
     id: int
-    axis_key: str = Field(..., min_length=1, max_length=50)
+    axis_key: str
     question_text: str
     choice_a: str
     choice_b: str
-    enabled: bool = True
+    enabled: bool

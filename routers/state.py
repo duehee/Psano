@@ -1,20 +1,31 @@
-from fastapi import APIRouter
+# routers/state.py
+from fastapi import APIRouter, HTTPException, Depends
+from sqlalchemy.orm import Session
+from sqlalchemy import text
+
 from schemas.state import StateResponse
-from routers._store import LOCK, GLOBAL_STATE
+from database import get_db  # 너 프로젝트 경로에 맞춰
 
 router = APIRouter()
 
 @router.get("", response_model=StateResponse)
-def get_state():
-    with LOCK:
-        formed_at = GLOBAL_STATE["formed_at"]
-        formed_iso = None
-        if formed_at is not None:
-            # 간단히 epoch를 문자열로(원하면 datetime ISO로 바꿔도 됨)
-            formed_iso = str(formed_at)
+def get_state(db: Session = Depends(get_db)):
+    row = db.execute(
+        text("""
+            SELECT phase, current_question, formed_at
+            FROM psano_state
+            WHERE id = 1
+        """)
+    ).mappings().first()
 
-        return {
-            "phase": GLOBAL_STATE["phase"],
-            "current_question": int(GLOBAL_STATE["current_question"]),
-            "formed_at": formed_iso,
-        }
+    if not row:
+        raise HTTPException(status_code=500, detail="psano_state(id=1) not found")
+
+    formed_at = row["formed_at"]
+    formed_iso = formed_at.isoformat() if formed_at is not None else None
+
+    return {
+        "phase": row["phase"],
+        "current_question": int(row["current_question"]),
+        "formed_at": formed_iso,
+    }
