@@ -168,6 +168,17 @@ HTML = r"""
     th { color: rgba(255,255,255,0.75); font-weight: 600; text-align: left; }
     td { color: rgba(255,255,255,0.82); }
     .right { text-align:right; }
+
+    /* ✅ checkbox styling(대충) */
+    .chk {
+      display:inline-flex;
+      gap:6px;
+      align-items:center;
+      font-size:12px;
+      color: rgba(255,255,255,0.75);
+      user-select:none;
+    }
+    .chk input { width:auto; }
   </style>
 </head>
 
@@ -265,7 +276,7 @@ HTML = r"""
             </div>
           </div>
 
-          <!-- ✅✅✅ 추가: Admin(운영자) 패널 -->
+          <!-- ✅✅✅ Admin(운영자) 패널 -->
           <div class="sep"></div>
 
           <div class="card" style="box-shadow:none; background: var(--panel2);">
@@ -287,6 +298,53 @@ HTML = r"""
 
               <div class="sep"></div>
 
+              <!-- ✅ reset controls -->
+              <div class="row" style="width:100%">
+                <div style="flex:1; min-width: 220px;">
+                  <div class="muted small">Reset</div>
+                  <div class="sub">POST <span class="mono">/admin/reset</span></div>
+                </div>
+                <div class="row">
+                  <label class="chk"><input id="resetAnswers" type="checkbox" /> answers</label>
+                  <label class="chk"><input id="resetSessions" type="checkbox" /> sessions</label>
+                  <label class="chk"><input id="resetState" type="checkbox" checked /> state</label>
+                  <button class="danger" onclick="adminReset()">Reset</button>
+                </div>
+              </div>
+
+              <div class="sep"></div>
+
+              <!-- ✅ phase set -->
+              <div class="row" style="width:100%">
+                <div style="flex:1; min-width: 220px;">
+                  <div class="muted small">Phase set (test)</div>
+                  <div class="sub">POST <span class="mono">/admin/phase/set</span></div>
+                </div>
+                <div class="row" style="min-width: 240px;">
+                  <select id="admPhaseSelect" style="padding:10px 12px; border-radius:14px; border:1px solid var(--line); background: rgba(0,0,0,0.22); color: var(--text);">
+                    <option value="formation">formation</option>
+                    <option value="chat">chat</option>
+                  </select>
+                  <button onclick="adminSetPhase()">Apply</button>
+                </div>
+              </div>
+
+              <div class="sep"></div>
+
+              <!-- ✅ set current question -->
+              <div class="row" style="width:100%">
+                <div style="flex:1; min-width: 220px;">
+                  <div class="muted small">Set current_question (test)</div>
+                  <div class="sub">POST <span class="mono">/admin/state/set_current_question</span></div>
+                </div>
+                <div class="row">
+                  <input id="admSetQ" value="1" style="width:110px" />
+                  <button onclick="adminSetCurrentQuestion()">Apply</button>
+                </div>
+              </div>
+
+              <div class="sep"></div>
+
               <div class="row" style="width:100%">
                 <div style="flex:1; min-width: 220px;">
                   <div class="muted small">최근 세션</div>
@@ -304,7 +362,7 @@ HTML = r"""
               <div class="out mono small" id="admSessionsBox">(아직 불러오지 않음)</div>
             </div>
           </div>
-          <!-- ✅✅✅ 추가 끝 -->
+          <!-- ✅✅✅ Admin 끝 -->
         </div>
       </section>
 
@@ -332,7 +390,10 @@ HTML = r"""
             <span class="mono">/state</span>,
             <span class="mono">/talk</span>,
             <span class="mono">/admin/progress</span>,
-            <span class="mono">/admin/sessions</span>
+            <span class="mono">/admin/sessions</span>,
+            <span class="mono">/admin/reset</span>,
+            <span class="mono">/admin/phase/set</span>,
+            <span class="mono">/admin/state/set_current_question</span>
           </div>
         </div>
       </aside>
@@ -459,6 +520,7 @@ HTML = r"""
       setQuestion(null, "아직 질문 없음");
       talkOutput.textContent = "아직 응답 없음";
       await refreshState();
+      await refreshAdminAll();
     } catch (e) {
       log("endSession error: " + e.message);
     } finally {
@@ -502,7 +564,6 @@ HTML = r"""
       }
 
       await refreshState();
-      // ✅ 운영자 패널도 같이 갱신
       await fetchAdminProgress();
     } catch (e) {
       log("sendAnswer error: " + e.message);
@@ -543,7 +604,7 @@ HTML = r"""
     }
   }
 
-  // ✅✅✅ Admin API 호출들
+  // ✅ Admin API
   function _pct(x) {
     if (x == null || isNaN(x)) return "-";
     return `${Math.round(x * 1000) / 10}%`;
@@ -612,6 +673,58 @@ HTML = r"""
   async function refreshAdminAll() {
     await fetchAdminProgress();
     await fetchAdminSessions();
+  }
+
+  // ✅ Admin Mutations
+  async function adminReset() {
+    startSpin();
+    try {
+      const body = {
+        reset_answers: !!document.getElementById("resetAnswers").checked,
+        reset_sessions: !!document.getElementById("resetSessions").checked,
+        reset_state: !!document.getElementById("resetState").checked,
+      };
+      const data = await fetchJson("/admin/reset", { method: "POST", body: JSON.stringify(body) });
+      log({ endpoint: "/admin/reset", data });
+      await refreshState();
+      await refreshAdminAll();
+      setQuestion(null, "아직 질문 없음");
+      talkOutput.textContent = "아직 응답 없음";
+    } catch (e) {
+      log("adminReset error: " + e.message);
+    } finally {
+      stopSpin();
+    }
+  }
+
+  async function adminSetPhase() {
+    startSpin();
+    try {
+      const phase = document.getElementById("admPhaseSelect").value;
+      const data = await fetchJson("/admin/phase/set", { method: "POST", body: JSON.stringify({ phase }) });
+      log({ endpoint: "/admin/phase/set", data });
+      await refreshState();
+      await refreshAdminAll();
+    } catch (e) {
+      log("adminSetPhase error: " + e.message);
+    } finally {
+      stopSpin();
+    }
+  }
+
+  async function adminSetCurrentQuestion() {
+    startSpin();
+    try {
+      const q = parseInt(document.getElementById("admSetQ").value || "1", 10);
+      const data = await fetchJson("/admin/state/set_current_question", { method: "POST", body: JSON.stringify({ current_question: q }) });
+      log({ endpoint: "/admin/state/set_current_question", data });
+      await refreshState();
+      await refreshAdminAll();
+    } catch (e) {
+      log("adminSetCurrentQuestion error: " + e.message);
+    } finally {
+      stopSpin();
+    }
   }
 
   // 페이지 로드 시 health + state + admin progress(가볍게)
