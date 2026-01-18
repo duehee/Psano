@@ -83,10 +83,44 @@ def start_session(req: SessionStartRequest, db: Session = Depends(get_db)):
 @router.post("/end", response_model=SessionEndResponse)
 def end_session(req: SessionEndRequest, db: Session = Depends(get_db)):
     sid = int(req.session_id)
+    reason = (req.reason or "completed")
+
+    # 0) 세션 존재/현재 종료 상태 확인(멱등성)
+    row = db.execute(
+        text("""
+            SELECT id, ended_at, end_reason
+            FROM sessions
+            WHERE id = :id
+        """),
+        {"id": sid},
+    ).mappings().first()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="session not found")
+
+    if row.get("ended_at") is not None:
+        # 이미 종료된 세션이면 그대로 반환(멱등)
+        ended_at = row.get("ended_at")
+        ended_iso = _iso(ended_at) if ended_at else None
+
+        with LOCK:
+            sess = SESSIONS.get(sid)
+            if sess:
+                sess["ended_at"] = ended_at
+                sess["end_reason"] = row.get("end_reason")
+
+        return {
+            "session_id": sid,
+            "ended": True,
+            "already_ended": True,
+            "end_reason": row.get("end_reason"),
+            "ended_at": ended_iso,
+        }
 
     try:
         ended_at = now_kst_naive()  # ✅ +9
 
+        # 1) end_reason 컬럼 유무에 따라 안전 처리 + ended_at IS NULL 조건
         try:
             res = db.execute(
                 text("""
@@ -94,8 +128,9 @@ def end_session(req: SessionEndRequest, db: Session = Depends(get_db)):
                     SET ended_at = :ended_at,
                         end_reason = :end_reason
                     WHERE id = :id
+                      AND ended_at IS NULL
                 """),
-                {"ended_at": ended_at, "end_reason": req.reason, "id": sid},
+                {"ended_at": ended_at, "end_reason": reason, "id": sid},
             )
         except Exception:
             res = db.execute(
@@ -103,27 +138,54 @@ def end_session(req: SessionEndRequest, db: Session = Depends(get_db)):
                     UPDATE sessions
                     SET ended_at = :ended_at
                     WHERE id = :id
+                      AND ended_at IS NULL
                 """),
                 {"ended_at": ended_at, "id": sid},
             )
 
         db.commit()
 
+        # 2) rowcount==0이면 (동시 요청 등으로) 이미 종료됐을 가능성 → 재조회해서 반환
         if (getattr(res, "rowcount", 0) or 0) == 0:
-            raise HTTPException(status_code=404, detail="session not found")
+            row2 = db.execute(
+                text("""
+                    SELECT ended_at, end_reason
+                    FROM sessions
+                    WHERE id = :id
+                """),
+                {"id": sid},
+            ).mappings().first()
+
+            ended_iso = _iso(row2.get("ended_at")) if row2 else None
+            return {
+                "session_id": sid,
+                "ended": True,
+                "already_ended": True,
+                "end_reason": (row2 or {}).get("end_reason"),
+                "ended_at": ended_iso,
+            }
+
     except HTTPException:
         raise
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"db error: {e}")
 
+    # 3) 메모리 캐시 반영
     with LOCK:
         sess = SESSIONS.get(sid)
         if sess and sess.get("ended_at") is None:
-            sess["ended_at"] = ended_at  # ✅ now_ts() 대신 KST naive datetime
-            sess["end_reason"] = req.reason
+            sess["ended_at"] = ended_at
+            sess["end_reason"] = reason
 
-    return {"session_id": sid, "ended": True}
+    return {
+        "session_id": sid,
+        "ended": True,
+        "already_ended": False,
+        "end_reason": reason,
+        "ended_at": _iso(ended_at),
+    }
+
 
 @router.get("/{session_id}")
 def get_session(session_id: int, db: Session = Depends(get_db)):
@@ -160,7 +222,7 @@ def get_session(session_id: int, db: Session = Depends(get_db)):
     return {
         "session_id": int(row["id"]),
         "visitor_name": row["visitor_name"],
-        "started_at": _iso(row["started_at"]),                 # ✅
-        "ended_at": _iso(ended_at) if ended_at else None,      # ✅
+        "started_at": _iso(row["started_at"]),
+        "ended_at": _iso(ended_at) if ended_at else None,
         "end_reason": row.get("end_reason")
     }

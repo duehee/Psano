@@ -1,5 +1,8 @@
 from pydantic import BaseModel, Field
+from typing import Optional, Literal
 from .common import Phase
+
+EndReason = Literal["completed", "max_reached", "timeout", "admin", "error"]
 
 class SessionStartRequest(BaseModel):
     visitor_name: str = Field(..., min_length=1, max_length=100)
@@ -11,8 +14,11 @@ class SessionStartResponse(BaseModel):
 
 class SessionEndRequest(BaseModel):
     session_id: int
-    reason: str | None = Field(default=None, max_length=32)
+    reason: Optional[EndReason] = "completed"
 
 class SessionEndResponse(BaseModel):
     session_id: int
-    ended: bool = True
+    ended: bool
+    end_reason: Optional[str] = None
+    ended_at: Optional[str] = None
+    already_ended: bool = False

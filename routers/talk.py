@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
-from schemas.talk import TalkRequest, TalkResponse
+from schemas.talk import TalkRequest, TalkResponse, TopicsResponse
 from schemas.common import Status
 from database import get_db
 
@@ -20,6 +20,14 @@ FALLBACK_LINES = [
     "답을 급히 만들고 싶진 않아. 한 번만 더 천천히 말해줄래?",
 ]
 
+def _iso(dt):
+    if dt is None:
+        return None
+    try:
+        return dt.isoformat(sep=" ", timespec="seconds")
+    except Exception:
+        return str(dt)
+
 def build_prompt(user_text: str, persona: str | None, summary: dict | None) -> str:
     persona = persona or "You are Psano."
     summary = summary or {}
@@ -33,7 +41,7 @@ def build_prompt(user_text: str, persona: str | None, summary: dict | None) -> s
     )
 
 @router.post("", response_model=TalkResponse)
-def talk(req: TalkRequest, db: Session = Depends(get_db)):
+def Talk(req: TalkRequest, db: Session = Depends(get_db)):
     # 1) psano_state 읽기 (phase / persona_prompt / values_summary)
     st = db.execute(
         text("""
@@ -49,7 +57,7 @@ def talk(req: TalkRequest, db: Session = Depends(get_db)):
     # ✅ 테스트용: formation에서도 talk 허용하고 싶으면 True로 바꿔
     ALLOW_TALK_IN_FORMATION = True
 
-    if st["phase"] != "chat" and not ALLOW_TALK_IN_FORMATION:
+    if st["phase"] != "talk" and not ALLOW_TALK_IN_FORMATION:
         raise HTTPException(status_code=409, detail="phase is not chat")
 
     # 2) 세션 존재/진행중 체크 (ended_at이 NULL인 세션만 허용)
@@ -94,7 +102,7 @@ def talk(req: TalkRequest, db: Session = Depends(get_db)):
         status = Status.fallback
         assistant_text = FALLBACK_LINES[int(time.time()) % len(FALLBACK_LINES)]
 
-    # 5) ✅ DB 저장: talk_messages
+    # 5) ✅ DB 저장 talk_messages
     # (테이블 컬럼: session_id, user_text, assistant_text, status, created_at)
     try:
         db.execute(
@@ -115,3 +123,27 @@ def talk(req: TalkRequest, db: Session = Depends(get_db)):
         pass
 
     return {"status": status, "ui_text": assistant_text}
+
+@router.get("/topics", response_model=TopicsResponse)
+def get_chat_topics(db: Session = Depends(get_db)):
+    try:
+        rows = db.execute(
+            text("""
+                SELECT id, title, description, created_at
+                FROM talk_topics
+                ORDER BY id ASC
+            """)
+        ).mappings().all()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"db error: {e}")
+
+    topics = []
+    for r in rows:
+        topics.append({
+            "id": int(r["id"]),
+            "title": r["title"],
+            "description": r["description"],
+            "created_at": _iso(r.get("created_at")),
+        })
+
+    return {"topics": topics}
