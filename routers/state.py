@@ -79,7 +79,7 @@ def get_state(db: Session = Depends(get_db)):
     for k in VALUE_KEYS:
         axis_scores[k] = int((pr or {}).get(k) or 0)
 
-    # 5) (선택) talk_unlocked
+    # 5) talk_unlocked
     talk_unlocked = (phase_out == "talk") or (answered_total >= TALK_UNLOCK_THRESHOLD)
 
     return {
