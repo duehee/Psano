@@ -1,3 +1,5 @@
+from typing import Optional
+
 from pydantic import BaseModel
 
 class QuestionResponse(BaseModel):
@@ -7,3 +9,8 @@ class QuestionResponse(BaseModel):
     choice_a: str
     choice_b: str
     enabled: bool
+
+    session_question_index: int
+
+    value_a_key: Optional[str] = None
+    value_b_key: Optional[str] = None

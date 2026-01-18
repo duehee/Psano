@@ -1,15 +1,16 @@
-from enum import Enum
-from pydantic import BaseModel, Field
+from typing import Optional, Literal
 
-class Choice(str, Enum):
-    A = "A"
-    B = "B"
+from pydantic import BaseModel
 
 class AnswerRequest(BaseModel):
     session_id: int
     question_id: int
-    choice: Choice
+    choice: Literal["A", "B"]
 
 class AnswerResponse(BaseModel):
-    saved: bool = True
-    next_question: int | None = None  # 다음 질문 id (formation에서만)
+    ok: bool
+    session_should_end: bool
+    session_question_index: int
+    chosen_value_key: Optional[str] = None
+    assistant_reaction_text: str
+    next_question: Optional[int] = None

@@ -117,7 +117,7 @@ HTML = r"""
     }
     textarea { min-height: 100px; resize: vertical; }
 
-    /* ✅ file input은 width 100%면 너무 커서 예쁘게 조정 */
+    /* file input은 width 100%면 너무 커서 예쁘게 조정 */
     input[type="file"] { width: auto; padding: 8px 10px; }
 
     .mono { font-family: var(--mono); }
@@ -158,7 +158,7 @@ HTML = r"""
     }
     @keyframes rot { to { transform: rotate(360deg); } }
 
-    /* ✅ admin sessions table 느낌 */
+    /* admin sessions table 느낌 */
     table {
       width: 100%;
       border-collapse: collapse;
@@ -173,7 +173,7 @@ HTML = r"""
     td { color: rgba(255,255,255,0.82); }
     .right { text-align:right; }
 
-    /* ✅ checkbox styling(대충) */
+    /* checkbox styling(대충) */
     .chk {
       display:inline-flex;
       gap:6px;
@@ -184,7 +184,7 @@ HTML = r"""
     }
     .chk input { width:auto; }
 
-    /* ✅ 작은 도움 텍스트 */
+    /* 작은 도움 텍스트 */
     .hint {
       font-size: 12px;
       color: rgba(255,255,255,0.62);
@@ -288,7 +288,7 @@ HTML = r"""
             </div>
           </div>
 
-          <!-- ✅✅✅ Admin(운영자) 패널 -->
+          <!-- Admin(운영자) 패널 -->
           <div class="sep"></div>
 
           <div class="card" style="box-shadow:none; background: var(--panel2);">
@@ -310,7 +310,7 @@ HTML = r"""
 
               <div class="sep"></div>
 
-              <!-- ✅ reset controls -->
+              <!-- reset controls -->
               <div class="row" style="width:100%">
                 <div style="flex:1; min-width: 220px;">
                   <div class="muted small">Reset</div>
@@ -326,7 +326,7 @@ HTML = r"""
 
               <div class="sep"></div>
 
-              <!-- ✅ phase set -->
+              <!-- phase set -->
               <div class="row" style="width:100%">
                 <div style="flex:1; min-width: 220px;">
                   <div class="muted small">Phase set (test)</div>
@@ -343,7 +343,7 @@ HTML = r"""
 
               <div class="sep"></div>
 
-              <!-- ✅ set current question -->
+              <!-- set current question -->
               <div class="row" style="width:100%">
                 <div style="flex:1; min-width: 220px;">
                   <div class="muted small">Set current_question (test)</div>
@@ -364,9 +364,9 @@ HTML = r"""
                   <div class="sub">POST <span class="mono">/admin/questions/import</span></div>
                 </div>
                 <div class="row" style="width:100%">
-                <!--
+                  <!--
                   <input id="admAdminToken" class="mono" placeholder="X-Admin-Token (optional)" style="max-width:260px" />
-                -->
+                  -->
                   <input id="admXlsxFile" type="file" accept=".xlsx" />
                   <button class="primary" onclick="adminImportQuestions()">Upload</button>
                 </div>
@@ -375,7 +375,7 @@ HTML = r"""
                   결과(성공/실패)는 오른쪽 Debug 로그에 찍힘
                 </div>
               </div>
-              <!-- ✅✅✅ NEW end -->
+              <!-- NEW end -->
 
               <div class="sep"></div>
 
@@ -396,7 +396,7 @@ HTML = r"""
               <div class="out mono small" id="admSessionsBox">(아직 불러오지 않음)</div>
             </div>
           </div>
-          <!-- ✅✅✅ Admin 끝 -->
+          <!-- Admin 끝 -->
         </div>
       </section>
 
@@ -447,7 +447,7 @@ HTML = r"""
   const talkOutput = document.getElementById("talkOutput");
   const logEl = document.getElementById("log");
 
-  // ✅ admin el
+  // admin el
   const admAnswered = document.getElementById("admAnswered");
   const admMax = document.getElementById("admMax");
   const admRatio = document.getElementById("admRatio");
@@ -465,6 +465,10 @@ HTML = r"""
     const t = new Date().toLocaleTimeString();
     const s = (typeof obj === "string") ? obj : JSON.stringify(obj, null, 2);
     logEl.textContent = `[${t}] ${s}\n\n` + logEl.textContent;
+  }
+
+  function logErr(where, e) {
+    log({ where, error: e?.message || String(e), data: e?._data || null });
   }
 
   function clearLog() { logEl.textContent = ""; }
@@ -490,7 +494,7 @@ HTML = r"""
     return data;
   }
 
-  // ✅ NEW: multipart/form-data 업로드용 (Content-Type 수동 지정 금지)
+  // multipart/form-data 업로드용 (Content-Type 수동 지정 금지)
   async function fetchMultipart(url, formData, headers = {}) {
     const res = await fetch(url, {
       method: "POST",
@@ -520,7 +524,7 @@ HTML = r"""
       log({ endpoint: "/health", data });
     } catch (e) {
       setPill("status-bad", "health: error");
-      log("health error: " + e.message);
+      logErr("checkHealth", e);
     } finally {
       stopSpin();
     }
@@ -535,9 +539,18 @@ HTML = r"""
     sessionBadge.textContent = `session_id: ${id || "-"}`;
   }
 
-  function setQuestion(id, text) {
+  // session_question_index 표시까지 지원하도록 확장(기존 호출 호환)
+  function setQuestion(id, text, sessionQuestionIndex = null) {
     lastQuestionId = id;
-    qBadge.textContent = `question_id: ${id ?? "-"}`;
+
+    if (id == null) {
+      qBadge.textContent = "question_id: -";
+    } else if (sessionQuestionIndex != null) {
+      qBadge.textContent = `question_id: ${id} (${sessionQuestionIndex}/5)`;
+    } else {
+      qBadge.textContent = `question_id: ${id ?? "-"}`;
+    }
+
     questionBox.textContent = text || "아직 질문 없음";
   }
 
@@ -560,7 +573,7 @@ HTML = r"""
       log({ endpoint: "/session/start", data });
       await refreshState();
     } catch (e) {
-      log("startSession error: " + e.message);
+      logErr("startSession", e);
     } finally {
       stopSpin();
     }
@@ -579,7 +592,7 @@ HTML = r"""
       await refreshState();
       await refreshAdminAll();
     } catch (e) {
-      log("endSession error: " + e.message);
+      logErr("endSession", e);
     } finally {
       stopSpin();
     }
@@ -589,16 +602,28 @@ HTML = r"""
     if (!sessionId) return log("세션이 없어. 먼저 Start를 선택해봐.");
     startSpin();
     try {
-      const data = await fetchJson("/question/current");
-      const text =
+      // session_id query 필수
+      const data = await fetchJson(`/question/current?session_id=${encodeURIComponent(sessionId)}`);
+
+      const idx = data.session_question_index ?? null;
+
+      // 표시 강화 (index + axis)
+      let text =
+        `[${idx ?? "-"} / 5]\n` +
         `${data.question_text}\n\n` +
         `A) ${data.choice_a}\n` +
         `B) ${data.choice_b}\n\n` +
         `axis_key: ${data.axis_key}`;
-      setQuestion(data.id, text);
+
+      // value 키를 내려주고 있다면 표시(없으면 조용히 무시)
+      if (data.value_a_key || data.value_b_key) {
+        text += `\nvalue_a_key: ${data.value_a_key ?? ""}\nvalue_b_key: ${data.value_b_key ?? ""}`;
+      }
+
+      setQuestion(data.id, text, idx);
       log({ endpoint: "/question/current", data });
     } catch (e) {
-      log("getCurrentQuestion error: " + e.message);
+      logErr("getCurrentQuestion", e);
     } finally {
       stopSpin();
     }
@@ -614,16 +639,22 @@ HTML = r"""
       const data = await fetchJson("/answer", { method: "POST", body: JSON.stringify(body) });
       log({ endpoint: "/answer", data });
 
-      if (data.next_question == null) {
-        setQuestion(null, "(형성 완료) phase가 chat으로 바뀌었을 수 있어. State 확인해봐.");
+      // reaction 먼저 표시
+      if (data.assistant_reaction_text) {
+        questionBox.textContent = data.assistant_reaction_text;
+      }
+
+      // 5회 도달이면 종료 안내
+      if (data.session_should_end) {
+        setQuestion(null, `(형성 완료) ${data.session_question_index ?? 5}/5. 이제 End 눌러서 세션 종료해줘.`);
       } else {
-        setQuestion(null, `(저장 완료!) 다음 질문: ${data.next_question}. Get current question 눌러서 가져와볼래?`);
+        setQuestion(null, `(저장 완료!) ${data.session_question_index ?? "-"}/5. 다음 질문은 Get current question 눌러서 가져와줘.`);
       }
 
       await refreshState();
       await fetchAdminProgress();
     } catch (e) {
-      log("sendAnswer error: " + e.message);
+      logErr("sendAnswer", e);
     } finally {
       stopSpin();
     }
@@ -642,7 +673,7 @@ HTML = r"""
       log({ endpoint: "/talk", data });
       await refreshState();
     } catch (e) {
-      log("sendTalk error: " + e.message);
+      logErr("sendTalk", e);
     } finally {
       stopSpin();
     }
@@ -655,13 +686,13 @@ HTML = r"""
       updateStatePanel(data);
       log({ endpoint: "/state", data });
     } catch (e) {
-      log("refreshState error: " + e.message);
+      logErr("refreshState", e);
     } finally {
       stopSpin();
     }
   }
 
-  // ✅ Admin API
+  // Admin API
   function _pct(x) {
     if (x == null || isNaN(x)) return "-";
     return `${Math.round(x * 1000) / 10}%`;
@@ -678,7 +709,7 @@ HTML = r"""
       admCurrentQ.textContent = data.current_question ?? "-";
       log({ endpoint: "/admin/progress", data });
     } catch (e) {
-      log("fetchAdminProgress error: " + e.message);
+      logErr("fetchAdminProgress", e);
     } finally {
       stopSpin();
     }
@@ -721,7 +752,7 @@ HTML = r"""
       log({ endpoint: "/admin/sessions", data: { total: data.total, shown: (data.sessions||[]).length } });
     } catch (e) {
       admSessionsBox.textContent = "(불러오기 실패)";
-      log("fetchAdminSessions error: " + e.message);
+      logErr("fetchAdminSessions", e);
     } finally {
       stopSpin();
     }
@@ -732,7 +763,7 @@ HTML = r"""
     await fetchAdminSessions();
   }
 
-  // ✅ Admin Mutations
+  // Admin Mutations
   async function adminReset() {
     startSpin();
     try {
@@ -748,7 +779,7 @@ HTML = r"""
       setQuestion(null, "아직 질문 없음");
       talkOutput.textContent = "아직 응답 없음";
     } catch (e) {
-      log("adminReset error: " + e.message);
+      logErr("adminReset", e);
     } finally {
       stopSpin();
     }
@@ -763,7 +794,7 @@ HTML = r"""
       await refreshState();
       await refreshAdminAll();
     } catch (e) {
-      log("adminSetPhase error: " + e.message);
+      logErr("adminSetPhase", e);
     } finally {
       stopSpin();
     }
@@ -778,16 +809,19 @@ HTML = r"""
       await refreshState();
       await refreshAdminAll();
     } catch (e) {
-      log("adminSetCurrentQuestion error: " + e.message);
+      logErr("adminSetCurrentQuestion", e);
     } finally {
       stopSpin();
     }
   }
 
-  // ✅✅✅ NEW: xlsx 업로드로 questions import
+  // xlsx 업로드로 questions import
   async function adminImportQuestions() {
     const fileEl = document.getElementById("admXlsxFile");
-    const token = (document.getElementById("admAdminToken").value || "").trim();
+
+    // 토큰 input이 주석/삭제되어도 안전하게
+    const tokenEl = document.getElementById("admAdminToken");
+    const token = (tokenEl ? tokenEl.value : "").trim();
 
     if (!fileEl || !fileEl.files || !fileEl.files.length) {
       return log("xlsx 파일이 없어. 파일 선택 후 Upload 눌러줘.");
@@ -803,16 +837,17 @@ HTML = r"""
       const fd = new FormData();
       fd.append("file", file);
 
-      // const headers = {};
-      // if (token) headers["X-Admin-Token"] = token;
+      // headers는 항상 선언(없으면 {})
+      const headers = {};
+      if (token) headers["X-Admin-Token"] = token;
 
       const data = await fetchMultipart("/admin/questions/import", fd, headers);
-      log({ endpoint: "/admin/questions/import(", data });
+      log({ endpoint: "/admin/questions/import", data });
 
       // 업로드 후 운영 정보 갱신
       await refreshAdminAll();
     } catch (e) {
-      log("adminImportQuestions error: " + e.message);
+      logErr("adminImportQuestions", e);
     } finally {
       stopSpin();
     }
