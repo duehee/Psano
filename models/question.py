@@ -8,14 +8,16 @@ from database import Base
 class Question(Base):
     __tablename__ = "questions"
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
+    id = Column(Integer, primary_key=True, autoincrement=False)
 
-    # 디자이너 데이터에서 받을 핵심 키 (예: freedom / order / challenge 등)
     axis_key = Column(String(64), nullable=False)
 
     question_text = Column(Text, nullable=False)
     choice_a = Column(String(255), nullable=False)
     choice_b = Column(String(255), nullable=False)
+
+    value_a_key = Column(String(64), nullable=True)
+    value_b_key = Column(String(64), nullable=True)
 
     enabled = Column(Boolean, default=True, nullable=False)
 

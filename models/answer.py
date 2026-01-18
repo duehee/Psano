@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Column, Integer, ForeignKey, DateTime, Enum
+from sqlalchemy import Column, Integer, ForeignKey, DateTime, Enum, String
 from sqlalchemy.orm import relationship
 
 from database import Base
@@ -13,8 +13,8 @@ class Answer(Base):
     session_id = Column(Integer, ForeignKey("sessions.id", ondelete="CASCADE"), nullable=False)
     question_id = Column(Integer, ForeignKey("questions.id", ondelete="RESTRICT"), nullable=False)
 
-    # ✅ A/B 저장 필수
     choice = Column(Enum("A", "B", name="answer_choice"), nullable=False)
+    chosen_value_key = Column(String(64), nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 

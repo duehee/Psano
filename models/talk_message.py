@@ -11,6 +11,7 @@ class TalkMessage(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
 
     session_id = Column(Integer, ForeignKey("sessions.id", ondelete="CASCADE"), nullable=False)
+    topic_id = Column(Integer, nullable=True)
 
     user_text = Column(Text, nullable=False)
     assistant_text = Column(Text, nullable=False)
