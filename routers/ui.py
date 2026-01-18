@@ -116,6 +116,10 @@ HTML = r"""
       font-size: 13px;
     }
     textarea { min-height: 100px; resize: vertical; }
+
+    /* ✅ file input은 width 100%면 너무 커서 예쁘게 조정 */
+    input[type="file"] { width: auto; padding: 8px 10px; }
+
     .mono { font-family: var(--mono); }
     .muted { color: var(--muted); }
     .sep { height: 1px; background: var(--line); margin: 12px 0; }
@@ -179,6 +183,14 @@ HTML = r"""
       user-select:none;
     }
     .chk input { width:auto; }
+
+    /* ✅ 작은 도움 텍스트 */
+    .hint {
+      font-size: 12px;
+      color: rgba(255,255,255,0.62);
+      line-height: 1.4;
+      margin-top: 8px;
+    }
   </style>
 </head>
 
@@ -345,6 +357,28 @@ HTML = r"""
 
               <div class="sep"></div>
 
+              <!-- NEW: Questions import (xlsx) -->
+              <div class="row" style="width:100%">
+                <div style="flex:1; min-width: 220px;">
+                  <div class="muted small">Questions import (xlsx)</div>
+                  <div class="sub">POST <span class="mono">/admin/questions/import</span></div>
+                </div>
+                <div class="row" style="width:100%">
+                <!--
+                  <input id="admAdminToken" class="mono" placeholder="X-Admin-Token (optional)" style="max-width:260px" />
+                -->
+                  <input id="admXlsxFile" type="file" accept=".xlsx" />
+                  <button class="primary" onclick="adminImportQuestions()">Upload</button>
+                </div>
+                <div class="hint">
+                  엑셀(.xlsx)을 올리면 <span class="mono">questions</span> 테이블이 upsert
+                  결과(성공/실패)는 오른쪽 Debug 로그에 찍힘
+                </div>
+              </div>
+              <!-- ✅✅✅ NEW end -->
+
+              <div class="sep"></div>
+
               <div class="row" style="width:100%">
                 <div style="flex:1; min-width: 220px;">
                   <div class="muted small">최근 세션</div>
@@ -393,7 +427,8 @@ HTML = r"""
             <span class="mono">/admin/sessions</span>,
             <span class="mono">/admin/reset</span>,
             <span class="mono">/admin/phase/set</span>,
-            <span class="mono">/admin/state/set_current_question</span>
+            <span class="mono">/admin/state/set_current_question</span>,
+            <span class="mono">/admin/questions/import</span>
           </div>
         </div>
       </aside>
@@ -441,6 +476,28 @@ HTML = r"""
       headers: { "Content-Type": "application/json", ...(options.headers || {}) },
       ...options
     });
+    const text = await res.text();
+    let data = null;
+    try { data = text ? JSON.parse(text) : null; }
+    catch { data = { _raw: text }; }
+
+    if (!res.ok) {
+      const detail = data?.detail || res.statusText || "request failed";
+      const err = new Error(`${res.status} ${detail}`);
+      err._data = data;
+      throw err;
+    }
+    return data;
+  }
+
+  // ✅ NEW: multipart/form-data 업로드용 (Content-Type 수동 지정 금지)
+  async function fetchMultipart(url, formData, headers = {}) {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { ...(headers || {}) },
+      body: formData,
+    });
+
     const text = await res.text();
     let data = null;
     try { data = text ? JSON.parse(text) : null; }
@@ -722,6 +779,40 @@ HTML = r"""
       await refreshAdminAll();
     } catch (e) {
       log("adminSetCurrentQuestion error: " + e.message);
+    } finally {
+      stopSpin();
+    }
+  }
+
+  // ✅✅✅ NEW: xlsx 업로드로 questions import
+  async function adminImportQuestions() {
+    const fileEl = document.getElementById("admXlsxFile");
+    const token = (document.getElementById("admAdminToken").value || "").trim();
+
+    if (!fileEl || !fileEl.files || !fileEl.files.length) {
+      return log("xlsx 파일이 없어. 파일 선택 후 Upload 눌러줘.");
+    }
+
+    const file = fileEl.files[0];
+    if (!file.name.toLowerCase().endsWith(".xlsx")) {
+      return log("xlsx만 업로드 가능해. (.xlsx)");
+    }
+
+    startSpin();
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+
+      // const headers = {};
+      // if (token) headers["X-Admin-Token"] = token;
+
+      const data = await fetchMultipart("/admin/questions/import", fd, headers);
+      log({ endpoint: "/admin/questions/import(", data });
+
+      // 업로드 후 운영 정보 갱신
+      await refreshAdminAll();
+    } catch (e) {
+      log("adminImportQuestions error: " + e.message);
     } finally {
       stopSpin();
     }

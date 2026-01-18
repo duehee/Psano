@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from io import BytesIO
+import os
+from typing import Optional, Dict, List
 
-from fastapi import APIRouter, Depends, Query, HTTPException
+from fastapi import APIRouter, Depends, Query, HTTPException, File, UploadFile, Header
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
@@ -14,9 +18,19 @@ from schemas.admin import (
     AdminSetCurrentQuestionRequest, AdminSetCurrentQuestionResponse,
 )
 
+try:
+    from openpyxl import load_workbook
+except ImportError:
+    raise RuntimeError("openpyxl is required. Install with: pip install openpyxl")
+
+
 router = APIRouter()
 
 MAX_QUESTIONS = 380
+
+# (선택) 최소 인증 토큰: 환경변수 ADMIN_TOKEN 설정 시 강제
+ADMIN_TOKEN = os.getenv("ADMIN_TOKEN")
+
 
 def _iso(dt):
     if dt is None:
@@ -25,6 +39,7 @@ def _iso(dt):
         return dt.isoformat(sep=" ", timespec="seconds")
     except Exception:
         return str(dt)
+
 
 def ensure_psano_state_row(db: Session):
     row = db.execute(text("SELECT id FROM psano_state WHERE id=1")).mappings().first()
@@ -38,8 +53,230 @@ def ensure_psano_state_row(db: Session):
         """)
     )
 
+
 def now_kst():
     return datetime.utcnow() + timedelta(hours=9)
+
+
+def _check_admin_token(x_admin_token: Optional[str]) -> None:
+    if not ADMIN_TOKEN:
+        return
+    if not x_admin_token or x_admin_token != ADMIN_TOKEN:
+        raise HTTPException(status_code=401, detail="Unauthorized (invalid admin token)")
+
+
+# =========================
+# /admin/questions/import 용 스키마/유틸
+# =========================
+
+AXIS_MAP: Dict[str, str] = {
+    "나의 길": "My way",
+    "새로움": "Newness",
+    "지금 이 순간": "This moment",
+    "성장": "growth",
+    "함께": "together",
+}
+
+# 컬럼 레터 매핑 (너가 준 엑셀 기준)
+COL_ID = "A"            # ID
+COL_AXIS_KO = "F"       # 주제 한글 -> axis_key (AXIS_MAP)
+COL_QUESTION = "H"      # 질문 -> question_text
+COL_VALUE_A = "D"       # 가치_A -> value_a_key
+COL_VALUE_B = "E"       # 가치_B -> value_b_key
+COL_CHOICE_A = "I"      # 선택지_A -> choice_a
+COL_CHOICE_B = "J"      # 선택지_B -> choice_b
+COL_ENABLED = "K"       # 활성화(Y/N) -> enabled
+
+
+class ImportErrorItem(BaseModel):
+    row: int
+    message: str
+
+
+class AdminQuestionsImportResponse(BaseModel):
+    processed: int = 0
+    inserted: int = 0
+    updated: int = 0
+    unchanged: int = 0
+    failed: int = 0
+    errors: List[ImportErrorItem] = Field(default_factory=list)
+
+
+def _cell_str(ws, col: str, row: int) -> str:
+    v = ws[f"{col}{row}"].value
+    if v is None:
+        return ""
+    return str(v).strip()
+
+
+def _cell_int(ws, col: str, row: int) -> Optional[int]:
+    v = ws[f"{col}{row}"].value
+    if v is None or str(v).strip() == "":
+        return None
+    try:
+        return int(v)
+    except Exception:
+        return None
+
+
+def _parse_enabled(raw: str) -> Optional[int]:
+    s = (raw or "").strip().upper()
+    if s == "Y":
+        return 1
+    if s == "N":
+        return 0
+    if s in ("1", "TRUE", "T"):
+        return 1
+    if s in ("0", "FALSE", "F"):
+        return 0
+    return None
+
+
+def _map_axis_key(axis_ko: str) -> Optional[str]:
+    k = (axis_ko or "").strip()
+    if not k:
+        return None
+    if k in AXIS_MAP:
+        return AXIS_MAP[k]
+    # 혹시 엑셀에 이미 영어 axis_key를 넣는 경우 그대로 허용
+    if k in AXIS_MAP.values():
+        return k
+    return None
+
+
+@router.post("/questions/import", response_model=AdminQuestionsImportResponse)
+async def admin_questions_import(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
+):
+    """
+    POST /admin/questions/import (라우터가 /admin prefix로 include된다는 가정)
+
+    xlsx 업로드로 questions upsert.
+    매핑:
+      A: id
+      F: 주제 한글 -> axis_key (AXIS_MAP)
+      H: question_text
+      I: choice_a
+      D: value_a_key
+      J: choice_b
+      E: value_b_key
+      K: enabled (Y/N -> 1/0)
+    """
+    _check_admin_token(x_admin_token)
+
+    if not file.filename.lower().endswith(".xlsx"):
+        raise HTTPException(status_code=400, detail="Only .xlsx files are supported")
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Empty file")
+
+    try:
+        wb = load_workbook(filename=BytesIO(content), data_only=True)
+        ws = wb.active
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid xlsx file: {e}")
+
+    result = AdminQuestionsImportResponse()
+
+    upsert_sql = text(
+        """
+        INSERT INTO questions
+            (id, axis_key, question_text, choice_a, choice_b, enabled, value_a_key, value_b_key)
+        VALUES
+            (:id, :axis_key, :question_text, :choice_a, :choice_b, :enabled, :value_a_key, :value_b_key)
+        ON DUPLICATE KEY UPDATE
+            axis_key = VALUES(axis_key),
+            question_text = VALUES(question_text),
+            choice_a = VALUES(choice_a),
+            choice_b = VALUES(choice_b),
+            enabled = VALUES(enabled),
+            value_a_key = VALUES(value_a_key),
+            value_b_key = VALUES(value_b_key)
+        """
+    )
+
+    try:
+        # 1행은 헤더라고 가정
+        for r in range(2, ws.max_row + 1):
+            id_val = _cell_int(ws, COL_ID, r)
+            q_text = _cell_str(ws, COL_QUESTION, r)
+
+            # 완전 빈 줄 스킵(기준: A/H 둘 다 비면)
+            if id_val is None and q_text == "":
+                continue
+
+            result.processed += 1
+
+            axis_ko = _cell_str(ws, COL_AXIS_KO, r)
+            axis_key = _map_axis_key(axis_ko)
+
+            choice_a = _cell_str(ws, COL_CHOICE_A, r)
+            choice_b = _cell_str(ws, COL_CHOICE_B, r)
+            value_a_key = _cell_str(ws, COL_VALUE_A, r)
+            value_b_key = _cell_str(ws, COL_VALUE_B, r)
+            enabled_raw = _cell_str(ws, COL_ENABLED, r)
+            enabled = _parse_enabled(enabled_raw)
+
+            # 필수값 검증
+            if id_val is None:
+                result.failed += 1
+                result.errors.append(ImportErrorItem(row=r, message="Invalid or missing ID (A column)"))
+                continue
+            if not axis_key:
+                result.failed += 1
+                result.errors.append(
+                    ImportErrorItem(
+                        row=r,
+                        message=f"Invalid axis (F column). Got '{axis_ko}'. Expected: {list(AXIS_MAP.keys())}",
+                    )
+                )
+                continue
+            if q_text == "":
+                result.failed += 1
+                result.errors.append(ImportErrorItem(row=r, message="Missing question_text (H column)"))
+                continue
+            if choice_a == "" or choice_b == "":
+                result.failed += 1
+                result.errors.append(ImportErrorItem(row=r, message="Missing choice_a(I) or choice_b(J)"))
+                continue
+            if enabled is None:
+                result.failed += 1
+                result.errors.append(
+                    ImportErrorItem(row=r, message=f"Invalid enabled (K column). Got '{enabled_raw}', expected Y/N")
+                )
+                continue
+
+            params = {
+                "id": id_val,
+                "axis_key": axis_key,
+                "question_text": q_text,
+                "choice_a": choice_a,
+                "choice_b": choice_b,
+                "enabled": enabled,
+                "value_a_key": value_a_key if value_a_key != "" else None,
+                "value_b_key": value_b_key if value_b_key != "" else None,
+            }
+
+            res = db.execute(upsert_sql, params)
+
+            # 보통 insert=1, update=2, no-op=0
+            if res.rowcount == 1:
+                result.inserted += 1
+            elif res.rowcount == 2:
+                result.updated += 1
+            else:
+                result.unchanged += 1
+
+        db.commit()
+        return result
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Import failed: {e}")
+
 
 @router.get("/sessions", response_model=AdminSessionsResponse)
 def list_sessions(
@@ -95,6 +332,7 @@ def list_sessions(
 
     return {"total": total, "sessions": sessions}
 
+
 @router.get("/progress", response_model=AdminProgressResponse)
 def get_progress(db: Session = Depends(get_db)):
     st = db.execute(
@@ -128,6 +366,7 @@ def get_progress(db: Session = Depends(get_db)):
         "max_questions": MAX_QUESTIONS,
         "progress_ratio": ratio,
     }
+
 
 @router.post("/reset", response_model=AdminResetResponse)
 def admin_reset(req: AdminResetRequest, db: Session = Depends(get_db)):
@@ -180,6 +419,7 @@ def admin_reset(req: AdminResetRequest, db: Session = Depends(get_db)):
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"db error: {e}")
+
 
 @router.post("/phase/set", response_model=AdminPhaseSetResponse)
 def admin_set_phase(req: AdminPhaseSetRequest, db: Session = Depends(get_db)):
