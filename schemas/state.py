@@ -1,7 +1,14 @@
 from pydantic import BaseModel
-from typing import Optional, Literal
+from typing import Optional, Literal, Dict
 
 class StateResponse(BaseModel):
-    phase: Literal["formation", "chat"]
+    phase: Literal["teach", "talk"]
+
     current_question: int
-    formed_at: Optional[str] = None  # ISO string
+
+    answered_total: int
+    axis_scores: Dict[str, int]
+
+    talk_unlocked: Optional[bool] = None
+    formed_at: Optional[str] = None
+    persona_prompt: Optional[str] = None
