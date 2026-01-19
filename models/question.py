@@ -11,14 +11,11 @@ class Question(Base):
     id = Column(Integer, primary_key=True, autoincrement=False)
 
     axis_key = Column(String(64), nullable=False)
-
     question_text = Column(Text, nullable=False)
     choice_a = Column(String(255), nullable=False)
     choice_b = Column(String(255), nullable=False)
-
     value_a_key = Column(String(64), nullable=True)
     value_b_key = Column(String(64), nullable=True)
-
     enabled = Column(Boolean, default=True, nullable=False)
 
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)

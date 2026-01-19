@@ -9,7 +9,6 @@ class Answer(Base):
     __tablename__ = "answers"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-
     session_id = Column(Integer, ForeignKey("sessions.id", ondelete="CASCADE"), nullable=False)
     question_id = Column(Integer, ForeignKey("questions.id", ondelete="RESTRICT"), nullable=False)
 

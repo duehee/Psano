@@ -7,7 +7,6 @@ from database import Base
 class PsanoState(Base):
     __tablename__ = "psano_state"
 
-    # 단일 레코드(항상 1)로 운영
     id = Column(Integer, primary_key=True)
 
     current_phase = Column(String(20), nullable=False, default="teach")

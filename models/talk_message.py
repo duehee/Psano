@@ -15,7 +15,6 @@ class TalkMessage(Base):
 
     user_text = Column(Text, nullable=False)
     assistant_text = Column(Text, nullable=False)
-
     status = Column(Enum("ok", "fallback", "error", name="talk_status"), nullable=False, default="ok")
 
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
