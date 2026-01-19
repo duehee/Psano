@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import List, Optional, Literal
 from pydantic import BaseModel, Field
 
-Phase = Literal["formation", "chat"]
+Phase = Literal["teach", "talk"]
 
 class AdminSessionItem(BaseModel):
     id: int
@@ -27,12 +27,14 @@ class AdminResetRequest(BaseModel):
     reset_answers: bool = Field(default=False)
     reset_sessions: bool = Field(default=False)
     reset_state: bool = Field(default=True)
+    reset_personality: bool = Field(default=False)
 
 class AdminResetResponse(BaseModel):
     ok: bool
     reset_answers: bool
     reset_sessions: bool
     reset_state: bool
+    reset_personality: bool
 
 class AdminPhaseSetRequest(BaseModel):
     phase: Phase

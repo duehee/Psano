@@ -2,8 +2,8 @@ from enum import Enum
 from pydantic import BaseModel
 
 class Phase(str, Enum):
-    formation = "formation"
-    chat = "chat"
+    teach = "teach"
+    talk = "talk"
 
 class Status(str, Enum):
     ok = "ok"

@@ -49,15 +49,10 @@ def get_state(db: Session = Depends(get_db)):
     formed_at = row.get("formed_at")
     formed_iso = formed_at.isoformat() if formed_at is not None else None
 
-    # 2) phase 변환: formation/chat -> teach/talk
-    raw_phase = (row.get("phase") or "").strip()
-    if raw_phase == "formation":
-        phase_out = "teach"
-    elif raw_phase == "chat":
-        phase_out = "talk"
-    else:
-        # 알 수 없는 값이면 teach로 fallback
-        phase_out = "teach"
+    # 2) phase 값 (teach / talk)
+    phase_out = (row.get("phase") or "").strip()
+    if phase_out not in ("teach", "talk"):
+        phase_out = "teach"  # 알 수 없는 값이면 teach로 fallback
 
     # 3) answered_total (누적 답변 수)
     cnt_row = db.execute(

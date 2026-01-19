@@ -10,7 +10,7 @@ class PsanoState(Base):
     # 단일 레코드(항상 1)로 운영
     id = Column(Integer, primary_key=True)
 
-    current_phase = Column(String(20), nullable=False, default="formation")
+    current_phase = Column(String(20), nullable=False, default="teach")
     current_question = Column(Integer, nullable=False, default=1)
 
     # 대화기 전환 후 "자아 프롬프트" 저장(옵션)

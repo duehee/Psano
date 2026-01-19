@@ -43,8 +43,8 @@ def get_current_question(
     if not st:
         raise HTTPException(status_code=500, detail="psano_state(id=1) not found")
 
-    if st["phase"] != "formation":
-        raise HTTPException(status_code=409, detail="phase is not formation")
+    if st["phase"] != "teach":
+        raise HTTPException(status_code=409, detail="phase is not teach")
 
     # 2) session_question_index 계산(답변 기준)
     answered_cnt = db.execute(
@@ -64,7 +64,7 @@ def get_current_question(
 
     qid = int(st["current_question"])
     if qid > MAX_QUESTIONS:
-        raise HTTPException(status_code=409, detail="formation already completed")
+        raise HTTPException(status_code=409, detail="teach phase already completed")
 
     # 3) value_a_key/value_b_key까지 같이 조회 (여기가 핵심 수정)
     q = db.execute(
