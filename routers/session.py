@@ -6,12 +6,13 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy import text
 from sqlalchemy.orm import Session
+from services.session_service import end_session_core
 
 from schemas.session import (
     SessionStartRequest, SessionStartResponse,
     SessionEndRequest, SessionEndResponse
 )
-from routers._store import LOCK, GLOBAL_STATE, SESSIONS, now_ts
+from routers._store import LOCK, GLOBAL_STATE, SESSIONS
 from database import get_db
 
 router = APIRouter()
@@ -21,7 +22,9 @@ KST = ZoneInfo("Asia/Seoul")
 
 def now_kst_naive() -> datetime:
     # DB DATETIME에 그대로 박을 "한국 시간" (tz 없는 naive datetime)
+    # KST는 DST 없어서 utc+9로도 OK
     return datetime.utcnow() + timedelta(hours=9)
+
 
 def _iso(dt):
     if dt is None:
@@ -31,6 +34,7 @@ def _iso(dt):
     except Exception:
         return str(dt)
 
+
 def _epoch_to_kst_iso(ts):
     if ts is None:
         return None
@@ -38,6 +42,46 @@ def _epoch_to_kst_iso(ts):
     dt = datetime.fromtimestamp(float(ts), tz=timezone.utc).astimezone(KST)
     dt = dt.replace(tzinfo=None)  # KST naive로 표기
     return _iso(dt)
+
+
+def _read_session_row(db: Session, sid: int):
+    """
+    sessions 테이블이 버전별로 컬럼이 다를 수 있어서 안전 조회:
+    - (신형) topic_id, talk_memory, turn_count 포함
+    - (구형) 없으면 fallback
+    """
+    try:
+        return db.execute(
+            text("""
+                SELECT id, visitor_name, started_at, ended_at, end_reason,
+                       topic_id, talk_memory, turn_count
+                FROM sessions
+                WHERE id = :sid
+            """),
+            {"sid": sid}
+        ).mappings().first()
+    except Exception:
+        # 구형 호환
+        try:
+            return db.execute(
+                text("""
+                    SELECT id, visitor_name, started_at, ended_at, end_reason
+                    FROM sessions
+                    WHERE id = :sid
+                """),
+                {"sid": sid}
+            ).mappings().first()
+        except Exception:
+            # 더 구형 호환(end_reason도 없던 시절)
+            return db.execute(
+                text("""
+                    SELECT id, visitor_name, started_at, ended_at
+                    FROM sessions
+                    WHERE id = :sid
+                """),
+                {"sid": sid}
+            ).mappings().first()
+
 
 @router.post("/start", response_model=SessionStartResponse)
 def start_session(req: SessionStartRequest, db: Session = Depends(get_db)):
@@ -47,6 +91,9 @@ def start_session(req: SessionStartRequest, db: Session = Depends(get_db)):
 
     try:
         started_at = now_kst_naive()  # ✅ +9
+
+        # ✅ 여기서는 teach/talk 여부와 상관없이 "세션 기본 정보만" 생성
+        # talk 관련(topic_id/talk_memory/turn_count)은 절대 건드리지 않음
         result = db.execute(
             text("""
                 INSERT INTO sessions (visitor_name, started_at)
@@ -69,9 +116,13 @@ def start_session(req: SessionStartRequest, db: Session = Depends(get_db)):
         SESSIONS[sid] = {
             "id": sid,
             "visitor_name": name,
-            "started_at": started_at,  # 이건 epoch라서 상관없음(원하면 이것도 KST로 바꿀 수 있음)
+            "started_at": started_at,   # datetime
             "ended_at": None,
             "end_reason": None,
+            # talk 전용은 "아직 시작 안 함" 상태로 둠
+            "topic_id": None,
+            "talk_memory": None,
+            "turn_count": 0,
         }
 
         return {
@@ -80,112 +131,12 @@ def start_session(req: SessionStartRequest, db: Session = Depends(get_db)):
             "current_question": int(GLOBAL_STATE["current_question"]),
         }
 
+
 @router.post("/end", response_model=SessionEndResponse)
 def end_session(req: SessionEndRequest, db: Session = Depends(get_db)):
     sid = int(req.session_id)
     reason = (req.reason or "completed")
-
-    # 0) 세션 존재/현재 종료 상태 확인(멱등성)
-    row = db.execute(
-        text("""
-            SELECT id, ended_at, end_reason
-            FROM sessions
-            WHERE id = :id
-        """),
-        {"id": sid},
-    ).mappings().first()
-
-    if not row:
-        raise HTTPException(status_code=404, detail="session not found")
-
-    if row.get("ended_at") is not None:
-        # 이미 종료된 세션이면 그대로 반환(멱등)
-        ended_at = row.get("ended_at")
-        ended_iso = _iso(ended_at) if ended_at else None
-
-        with LOCK:
-            sess = SESSIONS.get(sid)
-            if sess:
-                sess["ended_at"] = ended_at
-                sess["end_reason"] = row.get("end_reason")
-
-        return {
-            "session_id": sid,
-            "ended": True,
-            "already_ended": True,
-            "end_reason": row.get("end_reason"),
-            "ended_at": ended_iso,
-        }
-
-    try:
-        ended_at = now_kst_naive()  # ✅ +9
-
-        # 1) end_reason 컬럼 유무에 따라 안전 처리 + ended_at IS NULL 조건
-        try:
-            res = db.execute(
-                text("""
-                    UPDATE sessions
-                    SET ended_at = :ended_at,
-                        end_reason = :end_reason
-                    WHERE id = :id
-                      AND ended_at IS NULL
-                """),
-                {"ended_at": ended_at, "end_reason": reason, "id": sid},
-            )
-        except Exception:
-            res = db.execute(
-                text("""
-                    UPDATE sessions
-                    SET ended_at = :ended_at
-                    WHERE id = :id
-                      AND ended_at IS NULL
-                """),
-                {"ended_at": ended_at, "id": sid},
-            )
-
-        db.commit()
-
-        # 2) rowcount==0이면 (동시 요청 등으로) 이미 종료됐을 가능성 → 재조회해서 반환
-        if (getattr(res, "rowcount", 0) or 0) == 0:
-            row2 = db.execute(
-                text("""
-                    SELECT ended_at, end_reason
-                    FROM sessions
-                    WHERE id = :id
-                """),
-                {"id": sid},
-            ).mappings().first()
-
-            ended_iso = _iso(row2.get("ended_at")) if row2 else None
-            return {
-                "session_id": sid,
-                "ended": True,
-                "already_ended": True,
-                "end_reason": (row2 or {}).get("end_reason"),
-                "ended_at": ended_iso,
-            }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"db error: {e}")
-
-    # 3) 메모리 캐시 반영
-    with LOCK:
-        sess = SESSIONS.get(sid)
-        if sess and sess.get("ended_at") is None:
-            sess["ended_at"] = ended_at
-            sess["end_reason"] = reason
-
-    return {
-        "session_id": sid,
-        "ended": True,
-        "already_ended": False,
-        "end_reason": reason,
-        "ended_at": _iso(ended_at),
-    }
-
+    return end_session_core(db, sid, reason)
 
 @router.get("/{session_id}")
 def get_session(session_id: int, db: Session = Depends(get_db)):
@@ -195,34 +146,31 @@ def get_session(session_id: int, db: Session = Depends(get_db)):
     with LOCK:
         sess = SESSIONS.get(sid)
         if sess:
-            started = _iso(sess.get("started_at"))
-            ended = _iso(sess.get("ended_at"))
             return {
                 "session_id": sid,
                 "visitor_name": sess.get("visitor_name"),
-                "started_at": started,
-                "ended_at": ended,
-                "end_reason": sess.get("end_reason")
+                "started_at": _iso(sess.get("started_at")),
+                "ended_at": _iso(sess.get("ended_at")),
+                "end_reason": sess.get("end_reason"),
+                # talk 전용(없으면 None/0)
+                "topic_id": sess.get("topic_id"),
+                "talk_memory": sess.get("talk_memory"),
+                "turn_count": sess.get("turn_count", 0),
             }
 
-    # 2) DB fallback
-    row = db.execute(
-        text("""
-            SELECT id, visitor_name, started_at, ended_at, end_reason
-            FROM sessions
-            WHERE id = :sid
-        """),
-        {"sid": sid}
-    ).mappings().first()
-
+    # 2) DB fallback (optional 컬럼 안전)
+    row = _read_session_row(db, sid)
     if not row:
         raise HTTPException(status_code=404, detail="session not found")
 
     ended_at = row.get("ended_at")
     return {
         "session_id": int(row["id"]),
-        "visitor_name": row["visitor_name"],
-        "started_at": _iso(row["started_at"]),
+        "visitor_name": row.get("visitor_name"),
+        "started_at": _iso(row.get("started_at")),
         "ended_at": _iso(ended_at) if ended_at else None,
-        "end_reason": row.get("end_reason")
+        "end_reason": row.get("end_reason"),
+        "topic_id": row.get("topic_id"),
+        "talk_memory": row.get("talk_memory"),
+        "turn_count": int(row.get("turn_count") or 0),
     }

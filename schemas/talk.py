@@ -2,13 +2,42 @@ from pydantic import BaseModel, Field
 from typing import List, Optional
 from .common import Status
 
-class TalkRequest(BaseModel):
+class TalkStartRequest(BaseModel):
+    session_id: int = Field(..., ge=1)
+    topic_id: int = Field(..., ge=1)
+
+    model: Optional[str] = None
+    max_output_tokens: Optional[int] = None
+
+class TalkStartResponse(BaseModel):
+    status: Status
+    assistant_first_text: str
+    fallback_code: Optional[str] = None
+
+class TalkEndRequest(BaseModel):
     session_id: int
-    user_text: str = Field(..., min_length=1, max_length=1000)
+
+class TalkEndResponse(BaseModel):
+    session_id: int
+    ended: bool
+    already_ended: bool
+    end_reason: Optional[str] = None
+    ended_at: Optional[str] = None
+
+class TalkRequest(BaseModel):
+    session_id: int = Field(..., ge=1)
+    user_text: str = Field(..., min_length=1, max_length=200)
+    topic_id: Optional[int] = Field(None, ge=1)
+
+    model: Optional[str] = None
+    max_output_tokens: Optional[int] = None
 
 class TalkResponse(BaseModel):
     status: Status
-    ui_text: str  # 화면에 바로 뿌릴 텍스트
+    ui_text: str
+    fallback_code: Optional[str] = None
+    policy_category: Optional[str] = None
+    should_end: bool = False
 
 class TopicItem(BaseModel):
     id: int

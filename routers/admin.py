@@ -374,14 +374,29 @@ def admin_reset(req: AdminResetRequest, db: Session = Depends(get_db)):
     - reset_sessions: sessions 전체 삭제
     - reset_personality: psano_personality 10축 초기화(0)
     """
+    def _reset_table(table_name: str):
+        # table_name은 외부 입력이 아니라 코드에서만 쓰는 상수 전제
+        db.execute(text(f"DELETE FROM {table_name}"))
+        db.execute(text(f"ALTER TABLE {table_name} AUTO_INCREMENT = 1"))
+
     try:
         ensure_psano_state_row(db)
 
         if req.reset_answers:
-            db.execute(text("DELETE FROM answers ALTER TABLE answers AUTO_INCREMENT = 1;"))
+            _reset_table("answers")
 
         if req.reset_sessions:
-            db.execute(text("DELETE FROM sessions ALTER TABLE sessions AUTO_INCREMENT = 1;"))
+            # FK 고려: 자식 테이블 먼저 삭제(있을 수도/없을 수도 있으니 안전 처리)
+            try:
+                _reset_table("talk_messages")
+            except Exception:
+                # 테이블 없거나 AUTO_INCREMENT 없는 경우 등은 무시
+                pass
+
+            # 다른 자식 테이블이 있다면 여기에 같은 방식으로 추가 가능
+            # 예: try: _reset_table("some_child"); except: pass
+
+            _reset_table("sessions")
 
         if req.reset_personality:
             # id=1 row가 있다고 가정. 없을 수 있으면 insert 로직을 추가해도 됨.
@@ -436,6 +451,7 @@ def admin_reset(req: AdminResetRequest, db: Session = Depends(get_db)):
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"db error: {e}")
+
 
 
 @router.post("/phase/set", response_model=AdminPhaseSetResponse)

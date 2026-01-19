@@ -116,9 +116,16 @@ HTML = r"""
       font-size: 13px;
     }
     textarea { min-height: 100px; resize: vertical; }
-
-    /* file input은 width 100%면 너무 커서 예쁘게 조정 */
     input[type="file"] { width: auto; padding: 8px 10px; }
+    select {
+      padding: 10px 12px;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      background: rgba(0,0,0,0.22);
+      color: var(--text);
+      outline: none;
+      font-size: 13px;
+    }
 
     .mono { font-family: var(--mono); }
     .muted { color: var(--muted); }
@@ -158,7 +165,6 @@ HTML = r"""
     }
     @keyframes rot { to { transform: rotate(360deg); } }
 
-    /* admin sessions table 느낌 */
     table {
       width: 100%;
       border-collapse: collapse;
@@ -173,7 +179,6 @@ HTML = r"""
     td { color: rgba(255,255,255,0.82); }
     .right { text-align:right; }
 
-    /* checkbox styling(대충) */
     .chk {
       display:inline-flex;
       gap:6px;
@@ -184,13 +189,93 @@ HTML = r"""
     }
     .chk input { width:auto; }
 
-    /* 작은 도움 텍스트 */
     .hint {
       font-size: 12px;
       color: rgba(255,255,255,0.62);
       line-height: 1.4;
       margin-top: 8px;
     }
+
+    /* ===== Talk chat UI (NEW) ===== */
+    .chatWrap {
+      border: 1px solid var(--line);
+      background: rgba(0,0,0,0.18);
+      border-radius: 16px;
+      padding: 12px;
+    }
+
+    .chatList {
+      height: 360px;
+      overflow: auto;
+      padding: 6px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .bubbleRow {
+      display: flex;
+      align-items: flex-end;
+      gap: 8px;
+    }
+    .bubbleRow.user { justify-content: flex-end; }
+    .bubbleRow.assistant { justify-content: flex-start; }
+    .bubbleRow.system { justify-content: center; }
+
+    .bubble {
+      max-width: 78%;
+      padding: 10px 12px;
+      border-radius: 16px;
+      line-height: 1.45;
+      font-size: 13px;
+      border: 1px solid rgba(255,255,255,0.10);
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .bubble.user {
+      background: rgba(45,212,191,0.14);
+      border-color: rgba(45,212,191,0.28);
+    }
+
+    .bubble.assistant {
+      background: rgba(255,255,255,0.06);
+    }
+
+    .bubble.system {
+      background: rgba(255,255,255,0.04);
+      color: rgba(255,255,255,0.70);
+      border-style: dashed;
+      font-size: 12px;
+      max-width: 92%;
+      text-align: center;
+    }
+
+    .chatMeta {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: rgba(255,255,255,0.50);
+      margin: 0 4px;
+    }
+
+    .chatInputBar {
+      margin-top: 12px;
+      display: flex;
+      gap: 10px;
+      align-items: flex-end;
+    }
+
+    .chatInputBar textarea {
+      min-height: 56px;
+      resize: none;
+    }
+
+    /* ===== Chat mode (focus) ===== */
+    body.mode-chat .grid { grid-template-columns: 1fr; }
+    body.mode-chat #debugCard { display: none; }
+    body.mode-chat #formationCard { display: none; }
+    body.mode-chat #adminCard { display: none; }
+    body.mode-chat .chatList { height: 520px; }
   </style>
 </head>
 
@@ -224,7 +309,7 @@ HTML = r"""
           <div class="row">
             <button onclick="checkHealth()">Health</button>
             <button onclick="refreshState()">State</button>
-            <span class="kbd">Tip: Start(이름) → Question → Answer 반복 → chat되면 Talk</span>
+            <span class="kbd">Tip: Start(이름) → Question → Answer 반복 → talk 되면 Talk</span>
           </div>
 
           <div class="sep"></div>
@@ -240,14 +325,14 @@ HTML = r"""
                 </div>
               </div>
               <div class="sub" style="margin-top:10px">
-                Start는 <span class="mono">POST /session/start</span>로 <span class="mono">visitor_name</span>을 먼저 입력해줘.
+                Start는 <span class="mono">POST /session/start</span>로 <span class="mono">visitor_name</span>을 먼저 입력해 주세요.
               </div>
             </div>
           </div>
 
           <div class="sep"></div>
 
-          <div class="card" style="box-shadow:none; background: var(--panel2);">
+          <div id="formationCard" class="card" style="box-shadow:none; background: var(--panel2);">
             <div class="hd">
               <div class="title">Formation (A/B)</div>
               <div class="row">
@@ -263,35 +348,78 @@ HTML = r"""
                 <button onclick="sendAnswer('B')">Choose B</button>
               </div>
               <div class="sub" style="margin-top:10px">
-                <span class="mono">GET /question/current</span>로 받고, <span class="mono">POST /answer</span>로 저장해.
+                <span class="mono">GET /question/current</span>로 받고, <span class="mono">POST /answer</span>로 저장합니다.
               </div>
             </div>
           </div>
 
           <div class="sep"></div>
 
-          <div class="card" style="box-shadow:none; background: var(--panel2);">
+          <!-- Talk card (Chat UI) -->
+          <div id="talkCard" class="card" style="box-shadow:none; background: var(--panel2);">
             <div class="hd">
-              <div class="title">Talk (GPT)</div>
+              <div class="title">Talk (채팅)</div>
               <div class="row">
-                <button class="primary" onclick="sendTalk()">Send</button>
+                <button onclick="loadTopics()">Load topics</button>
+                <button class="ghost" onclick="toggleChatMode()">대화 모드</button>
+                <button class="ghost" onclick="clearChatUI()">Clear</button>
                 <button class="ghost" onclick="setExample()">Example</button>
+                <button class="danger" onclick="talkEnd()">Talk End</button>    
               </div>
             </div>
+
             <div class="body">
-              <textarea id="talkInput" placeholder="여기에 질문 입력... (chat phase에서만 동작)"></textarea>
+              <div class="row" style="width:100%">
+                <select id="topicSelect" style="min-width: 220px;">
+                  <option value="1">1</option>
+                  <option value="2">2</option>
+                  <option value="3">3</option>
+                  <option value="4">4</option>
+                  <option value="5">5</option>
+                  <option value="6">6</option>
+                  <option value="7">7</option>
+                  <option value="8">8</option>
+                  <option value="9">9</option>
+                  <option value="10">10</option>
+                </select>
+                <span id="topicBadge" class="badge mono">topic_id: -</span>
+              </div>
+
+              <div class="hint" id="topicHint">
+                topics를 로드하면 title/description이 표시됩니다. Talk Start는 <span class="mono">POST /talk/start</span> 호출입니다.
+              </div>
+
               <div class="sep"></div>
-              <div id="talkOutput" class="out muted small">아직 응답 없음</div>
+
+              <div class="chatWrap">
+                <div id="chatList" class="chatList">
+                  <div class="bubbleRow system">
+                    <div class="bubble system">아직 대화가 없습니다. Talk Start를 눌러 시작해 주세요.</div>
+                  </div>
+                </div>
+
+                <div class="chatInputBar">
+                  <textarea id="talkInput" placeholder="메시지를 입력하세요... (Enter: 전송, Shift+Enter: 줄바꿈)"></textarea>
+                  <div style="display:flex; flex-direction:column; gap:10px; min-width: 130px;">
+                    <button class="primary" onclick="talkStart()">Talk Start</button>
+                    <button class="primary" onclick="sendTalk()">Send</button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 기존 Debug용 출력(호환 유지) -->
+              <div id="talkOutput" class="out muted small" style="display:none">아직 응답 없음</div>
+
               <div class="sub" style="margin-top:10px">
-                formation 단계면 Talk은 사용할 수 없는게 정상(409).
+                teach 단계면 Talk은 사용할 수 없는 것이 정상입니다(409).
               </div>
             </div>
           </div>
 
-          <!-- Admin(운영자) 패널 -->
           <div class="sep"></div>
 
-          <div class="card" style="box-shadow:none; background: var(--panel2);">
+          <!-- Admin panel -->
+          <div id="adminCard" class="card" style="box-shadow:none; background: var(--panel2);">
             <div class="hd">
               <div class="title">Admin</div>
               <div class="row">
@@ -310,7 +438,6 @@ HTML = r"""
 
               <div class="sep"></div>
 
-              <!-- reset controls -->
               <div class="row" style="width:100%">
                 <div style="flex:1; min-width: 220px;">
                   <div class="muted small">Reset</div>
@@ -319,23 +446,23 @@ HTML = r"""
                 <div class="row">
                   <label class="chk"><input id="resetAnswers" type="checkbox" /> answers</label>
                   <label class="chk"><input id="resetSessions" type="checkbox" /> sessions</label>
-                  <label class="chk"><input id="resetState" type="checkbox" checked /> state</label>
+                  <label class="chk"><input id="resetState" type="checkbox" /> state</label>
+                  <label class="chk"><input id="resetPsanoPersonality" type="checkbox" /> personality</label>
                   <button class="danger" onclick="adminReset()">Reset</button>
                 </div>
               </div>
 
               <div class="sep"></div>
 
-              <!-- phase set -->
               <div class="row" style="width:100%">
                 <div style="flex:1; min-width: 220px;">
                   <div class="muted small">Phase set (test)</div>
                   <div class="sub">POST <span class="mono">/admin/phase/set</span></div>
                 </div>
                 <div class="row" style="min-width: 240px;">
-                  <select id="admPhaseSelect" style="padding:10px 12px; border-radius:14px; border:1px solid var(--line); background: rgba(0,0,0,0.22); color: var(--text);">
-                    <option value="formation">formation</option>
-                    <option value="chat">chat</option>
+                  <select id="admPhaseSelect">
+                    <option value="teach">teach</option>
+                    <option value="talk">talk</option>
                   </select>
                   <button onclick="adminSetPhase()">Apply</button>
                 </div>
@@ -343,7 +470,6 @@ HTML = r"""
 
               <div class="sep"></div>
 
-              <!-- set current question -->
               <div class="row" style="width:100%">
                 <div style="flex:1; min-width: 220px;">
                   <div class="muted small">Set current_question (test)</div>
@@ -357,25 +483,37 @@ HTML = r"""
 
               <div class="sep"></div>
 
-              <!-- NEW: Questions import (xlsx) -->
               <div class="row" style="width:100%">
                 <div style="flex:1; min-width: 220px;">
                   <div class="muted small">Questions import (xlsx)</div>
                   <div class="sub">POST <span class="mono">/admin/questions/import</span></div>
                 </div>
                 <div class="row" style="width:100%">
-                  <!--
-                  <input id="admAdminToken" class="mono" placeholder="X-Admin-Token (optional)" style="max-width:260px" />
-                  -->
                   <input id="admXlsxFile" type="file" accept=".xlsx" />
                   <button class="primary" onclick="adminImportQuestions()">Upload</button>
                 </div>
                 <div class="hint">
-                  엑셀(.xlsx)을 올리면 <span class="mono">questions</span> 테이블이 upsert
-                  결과(성공/실패)는 오른쪽 Debug 로그에 찍힘
+                  엑셀(.xlsx)을 올리면 <span class="mono">questions</span> 테이블이 upsert 됩니다.
                 </div>
               </div>
-              <!-- NEW end -->
+
+              <div class="sep"></div>
+
+              <div class="row" style="width:100%">
+                <div style="flex:1; min-width: 220px;">
+                  <div class="muted small">Persona generate</div>
+                  <div class="sub">POST <span class="mono">/persona/generate</span></div>
+                </div>
+                <div class="row" style="width:100%">
+                  <input id="personaModel" class="mono" placeholder="model (optional)" style="max-width:240px" />
+                  <input id="personaMaxTokens" class="mono" placeholder="max_output_tokens (optional)" style="max-width:220px" />
+                  <label class="chk"><input id="personaForce" type="checkbox" /> force</label>
+                  <button class="primary" onclick="personaGenerate()">Generate</button>
+                </div>
+                <div class="hint">
+                  테스트용입니다. 성공하면 <span class="mono">/state</span>에서 phase 확인이 가능합니다.
+                </div>
+              </div>
 
               <div class="sep"></div>
 
@@ -396,12 +534,12 @@ HTML = r"""
               <div class="out mono small" id="admSessionsBox">(아직 불러오지 않음)</div>
             </div>
           </div>
-          <!-- Admin 끝 -->
+          <!-- Admin end -->
         </div>
       </section>
 
       <!-- Right: debug panel -->
-      <aside class="card">
+      <aside id="debugCard" class="card">
         <div class="hd">
           <div class="title">Debug</div>
           <div class="row">
@@ -417,12 +555,15 @@ HTML = r"""
           <div class="sep"></div>
           <div class="out mono small" id="log"></div>
           <div class="sub" style="margin-top:12px">
-            현재 UI는 새 엔드포인트에 맞춰서 동작함:
+            현재 UI는 다음 엔드포인트에 맞춰 동작합니다:
             <span class="mono">/session/start</span>,
             <span class="mono">/question/current</span>,
             <span class="mono">/answer</span>,
             <span class="mono">/state</span>,
-            <span class="mono">/talk</span>,
+            <span class="mono">/talk/topics</span>,
+            <span class="mono">/talk/start</span>,
+            <span class="mono">/talk/turn</span>,
+            <span class="mono">/persona/generate</span>,
             <span class="mono">/admin/progress</span>,
             <span class="mono">/admin/sessions</span>,
             <span class="mono">/admin/reset</span>,
@@ -439,6 +580,10 @@ HTML = r"""
   let sessionId = null;
   let lastQuestionId = null;
 
+  // talk topic state
+  let topicsCache = [];
+  let activeTopicId = null;
+
   const spinner = document.getElementById("spinner");
   const pill = document.getElementById("healthPill");
   const sessionBadge = document.getElementById("sessionBadge");
@@ -446,6 +591,14 @@ HTML = r"""
   const questionBox = document.getElementById("questionBox");
   const talkOutput = document.getElementById("talkOutput");
   const logEl = document.getElementById("log");
+
+  // talk topic UI
+  const topicSelect = document.getElementById("topicSelect");
+  const topicHint = document.getElementById("topicHint");
+  const topicBadge = document.getElementById("topicBadge");
+
+  // chat UI
+  const chatList = document.getElementById("chatList");
 
   // admin el
   const admAnswered = document.getElementById("admAnswered");
@@ -494,7 +647,6 @@ HTML = r"""
     return data;
   }
 
-  // multipart/form-data 업로드용 (Content-Type 수동 지정 금지)
   async function fetchMultipart(url, formData, headers = {}) {
     const res = await fetch(url, {
       method: "POST",
@@ -532,6 +684,7 @@ HTML = r"""
 
   function setExample() {
     document.getElementById("talkInput").value = "사노야, 너는 지금 무엇이 되었어?";
+    document.getElementById("talkInput").focus();
   }
 
   function setSession(id) {
@@ -539,7 +692,6 @@ HTML = r"""
     sessionBadge.textContent = `session_id: ${id || "-"}`;
   }
 
-  // session_question_index 표시까지 지원하도록 확장(기존 호출 호환)
   function setQuestion(id, text, sessionQuestionIndex = null) {
     lastQuestionId = id;
 
@@ -563,7 +715,7 @@ HTML = r"""
 
   async function startSession() {
     const name = document.getElementById("visitorName").value.trim();
-    if (!name) return log("visitor_name 비어있음. 이름을 입력해줘.");
+    if (!name) return log("visitor_name이 비어 있습니다. 이름을 입력해 주세요.");
 
     startSpin();
     try {
@@ -572,6 +724,11 @@ HTML = r"""
       setSession(data.session_id);
       log({ endpoint: "/session/start", data });
       await refreshState();
+
+      // 세션 새로 시작하면 토픽/채팅도 초기화
+      activeTopicId = null;
+      topicBadge.textContent = "topic_id: -";
+      clearChatUI();
     } catch (e) {
       logErr("startSession", e);
     } finally {
@@ -580,7 +737,7 @@ HTML = r"""
   }
 
   async function endSession() {
-    if (!sessionId) return log("세션이 없어. 먼저 Start를 클릭해봐.");
+    if (!sessionId) return log("세션이 없습니다. 먼저 Start를 눌러 주세요.");
     startSpin();
     try {
       const body = { session_id: sessionId, reason: "completed" };
@@ -588,7 +745,9 @@ HTML = r"""
       log({ endpoint: "/session/end", data });
       setSession(null);
       setQuestion(null, "아직 질문 없음");
-      talkOutput.textContent = "아직 응답 없음";
+      activeTopicId = null;
+      topicBadge.textContent = "topic_id: -";
+      clearChatUI();
       await refreshState();
       await refreshAdminAll();
     } catch (e) {
@@ -599,15 +758,12 @@ HTML = r"""
   }
 
   async function getCurrentQuestion() {
-    if (!sessionId) return log("세션이 없어. 먼저 Start를 선택해봐.");
+    if (!sessionId) return log("세션이 없습니다. 먼저 Start를 눌러 주세요.");
     startSpin();
     try {
-      // session_id query 필수
       const data = await fetchJson(`/question/current?session_id=${encodeURIComponent(sessionId)}`);
-
       const idx = data.session_question_index ?? null;
 
-      // 표시 강화 (index + axis)
       let text =
         `[${idx ?? "-"} / 5]\n` +
         `${data.question_text}\n\n` +
@@ -615,7 +771,6 @@ HTML = r"""
         `B) ${data.choice_b}\n\n` +
         `axis_key: ${data.axis_key}`;
 
-      // value 키를 내려주고 있다면 표시(없으면 조용히 무시)
       if (data.value_a_key || data.value_b_key) {
         text += `\nvalue_a_key: ${data.value_a_key ?? ""}\nvalue_b_key: ${data.value_b_key ?? ""}`;
       }
@@ -630,8 +785,8 @@ HTML = r"""
   }
 
   async function sendAnswer(choice) {
-    if (!sessionId) return log("세션이 없어. 먼저 Start를 선택해봐.");
-    if (!lastQuestionId) return log("질문 없음. Get current question 먼저 눌러줘.");
+    if (!sessionId) return log("세션이 없습니다. 먼저 Start를 눌러 주세요.");
+    if (!lastQuestionId) return log("질문이 없습니다. Get current question을 먼저 눌러 주세요.");
 
     startSpin();
     try {
@@ -639,16 +794,14 @@ HTML = r"""
       const data = await fetchJson("/answer", { method: "POST", body: JSON.stringify(body) });
       log({ endpoint: "/answer", data });
 
-      // reaction 먼저 표시
       if (data.assistant_reaction_text) {
         questionBox.textContent = data.assistant_reaction_text;
       }
 
-      // 5회 도달이면 종료 안내
       if (data.session_should_end) {
-        setQuestion(null, `(형성 완료) ${data.session_question_index ?? 5}/5. 이제 End 눌러서 세션 종료해줘.`);
+        setQuestion(null, `(형성 완료) ${data.session_question_index ?? 5}/5. 이제 End를 눌러 세션을 종료해 주세요.`);
       } else {
-        setQuestion(null, `(저장 완료!) ${data.session_question_index ?? "-"}/5. 다음 질문은 Get current question 눌러서 가져와줘.`);
+        setQuestion(null, `(저장 완료) ${data.session_question_index ?? "-"}/5. 다음 질문은 Get current question으로 가져와 주세요.`);
       }
 
       await refreshState();
@@ -660,24 +813,279 @@ HTML = r"""
     }
   }
 
-  async function sendTalk() {
-    if (!sessionId) return log("세션 없음. 먼저 Start를 선택해봐.");
-    const txt = document.getElementById("talkInput").value.trim();
-    if (!txt) return log("talk input 비어있음");
+  // topics load + render
+  function _normalizeTopics(raw) {
+    if (!raw) return [];
+    if (Array.isArray(raw)) return raw;
+    if (Array.isArray(raw.topics)) return raw.topics;
+    if (Array.isArray(raw.items)) return raw.items;
+    return [];
+  }
 
+  function renderTopics(topics) {
+    const byId = {};
+    for (const t of topics) {
+      const id = parseInt(t.id, 10);
+      if (!isNaN(id)) byId[id] = t;
+    }
+
+    topicSelect.innerHTML = "";
+    for (let i = 1; i <= 10; i++) {
+      const t = byId[i];
+      const opt = document.createElement("option");
+      opt.value = String(i);
+      opt.textContent = t?.title ? `${i}. ${t.title}` : `${i}`;
+      topicSelect.appendChild(opt);
+    }
+
+    topicsCache = topics;
+    updateTopicHint();
+  }
+
+  function updateTopicHint() {
+    const selectedId = parseInt(topicSelect.value || "0", 10);
+    const t = topicsCache.find(x => parseInt(x.id, 10) === selectedId);
+
+    topicBadge.textContent = `topic_id: ${activeTopicId ?? "-"}`;
+
+    if (!t) {
+      topicHint.textContent = "topics를 로드하면 title/description이 표시됩니다.";
+      return;
+    }
+    const title = t.title ?? "";
+    const desc = t.description ?? "";
+    topicHint.textContent = `${selectedId}. ${title} — ${desc}`;
+  }
+
+  topicSelect.addEventListener("change", updateTopicHint);
+
+  async function loadTopics() {
     startSpin();
     try {
-      const body = { session_id: sessionId, user_text: txt };
-      const data = await fetchJson("/talk", { method: "POST", body: JSON.stringify(body) });
-      talkOutput.textContent = data.ui_text || "(empty)";
-      log({ endpoint: "/talk", data });
-      await refreshState();
+      const data = await fetchJson("/talk/topics");
+      const topics = _normalizeTopics(data);
+      renderTopics(topics);
+      log({ endpoint: "/talk/topics", data: { count: topics.length } });
     } catch (e) {
-      logErr("sendTalk", e);
+      logErr("loadTopics", e);
     } finally {
       stopSpin();
     }
   }
+
+  /* ===== Chat UI helpers ===== */
+  function escapeHtml(s) {
+    return (s ?? "")
+      .toString()
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;");
+  }
+
+  function nowTime() {
+    try { return new Date().toLocaleTimeString(); }
+    catch { return ""; }
+  }
+
+  function scrollChatToBottom() {
+    if (!chatList) return;
+    chatList.scrollTop = chatList.scrollHeight + 9999;
+  }
+
+  function appendChat(role, text, meta = "") {
+    if (!chatList) return null;
+
+    const row = document.createElement("div");
+    row.className = `bubbleRow ${role}`;
+
+    const bubble = document.createElement("div");
+    bubble.className = `bubble ${role}`;
+    bubble.innerHTML = escapeHtml(text);
+
+    row.appendChild(bubble);
+
+    if (meta && role !== "system") {
+      const m = document.createElement("div");
+      m.className = "chatMeta";
+      m.textContent = meta;
+      row.appendChild(m);
+    }
+
+    chatList.appendChild(row);
+    scrollChatToBottom();
+    return bubble;
+  }
+
+  function clearChatUI() {
+    if (!chatList) return;
+    chatList.innerHTML = "";
+    appendChat("system", "대화가 초기화되었습니다. Talk Start를 눌러 다시 시작해 주세요.");
+  }
+
+  function toggleChatMode() {
+    document.body.classList.toggle("mode-chat");
+    scrollChatToBottom();
+  }
+
+  // talk start
+  async function talkStart() {
+    if (!sessionId) return log("세션이 없습니다. 먼저 Start를 눌러 주세요.");
+    const tid = parseInt(topicSelect.value || "1", 10);
+
+    startSpin();
+    try {
+      const body = { session_id: sessionId, topic_id: tid };
+      const data = await fetchJson("/talk/start", { method: "POST", body: JSON.stringify(body) });
+
+      const first =
+        data.assistant_first_text ??
+        data.ui_text ??
+        data.assistant_text ??
+        data.text ??
+        "";
+
+      activeTopicId = tid;
+      topicBadge.textContent = `topic_id: ${activeTopicId}`;
+      updateTopicHint();
+
+      clearChatUI();
+      appendChat("system", `대화를 시작합니다. (topic_id: ${tid})`);
+      appendChat("assistant", first || "(empty)", nowTime());
+      
+      const inputEl = document.getElementById("talkInput");
+      if (inputEl) inputEl.disabled = false;
+
+      talkOutput.textContent = first || "(empty)";
+      log({ endpoint: "/talk/start", data });
+      await refreshState();
+    } catch (e) {
+      logErr("talkStart", e);
+      appendChat("system", `시작 실패: ${e?.message || e}`);
+    } finally {
+      stopSpin();
+    }
+  }
+
+  // talk turn ( /talk/turn 우선, 없으면 /talk fallback )
+  async function sendTalk() {
+    if (!sessionId) return log("세션이 없습니다. 먼저 Start를 눌러 주세요.");
+    const inputEl = document.getElementById("talkInput");
+    const txt = (inputEl?.value || "").trim();
+    if (!txt) return log("메시지가 비어 있습니다.");
+
+    const tid = activeTopicId ?? parseInt(topicSelect.value || "1", 10);
+
+    // 유저 말풍선
+    appendChat("user", txt, nowTime());
+    if (inputEl) inputEl.value = "";
+  
+    // 타이핑 버블(이 버블을 '최종 응답 버블'로 바꿀 것)
+    const typingRow = document.createElement("div");
+    typingRow.className = "bubbleRow assistant";
+
+    const typingBubble = document.createElement("div");
+    typingBubble.className = "bubble assistant";
+    typingBubble.innerHTML = "…";
+
+    const typingMeta = document.createElement("div");
+    typingMeta.className = "chatMeta";
+    typingMeta.textContent = "typing";
+
+    typingRow.appendChild(typingBubble);
+    typingRow.appendChild(typingMeta);
+    chatList.appendChild(typingRow);
+    scrollChatToBottom();
+
+    startSpin();
+    try {
+      // 1) /talk/turn 우선
+      try {
+        const body = { session_id: sessionId, topic_id: tid, user_text: txt };
+        const data = await fetchJson("/talk/turn", { method: "POST", body: JSON.stringify(body) });
+
+        const out =
+          data.assistant_text ??
+          data.ui_text ??
+          data.text ??
+          "";
+
+        // 타이핑 버블을 최종 응답으로 교체 (추가 append 하지 않음)
+        typingBubble.innerHTML = escapeHtml(out || "(empty)");
+        typingMeta.textContent = nowTime();
+
+        talkOutput.textContent = out || "(empty)";
+        log({ endpoint: "/talk/turn", data });
+        await refreshState();
+        return;
+      } catch (e1) {
+        const msg = (e1?.message || "");
+        if (!msg.startsWith("404 ")) throw e1;
+      }
+
+      // 2) /talk fallback
+      const body2 = { session_id: sessionId, user_text: txt };
+      const data2 = await fetchJson("/talk", { method: "POST", body: JSON.stringify(body2) });
+
+      const out2 =
+        data2.assistant_text ??
+        data2.ui_text ??
+        data2.text ??
+        "";
+
+      typingBubble.innerHTML = escapeHtml(out2 || "(empty)");
+      typingMeta.textContent = nowTime();
+
+      talkOutput.textContent = out2 || "(empty)";
+      log({ endpoint: "/talk (fallback)", data: data2 });
+      await refreshState();
+    } catch (e) {
+      logErr("sendTalk", e);
+      typingBubble.innerHTML = escapeHtml(`에러: ${e?.message || e}`);
+      typingMeta.textContent = nowTime();
+      appendChat("system", `전송 실패: ${e?.message || e}`);
+    } finally {
+      stopSpin();
+    }
+  }
+  
+  async function talkEnd() {
+    if (!sessionId) return log("세션이 없습니다. 먼저 Start를 눌러 주세요.");
+
+    startSpin();
+    try {
+      const body = { session_id: sessionId };
+      const data = await fetchJson("/talk/end", { method: "POST", body: JSON.stringify(body) });
+
+      // 채팅창에 시스템 메시지
+      if (typeof appendChat === "function") {
+        appendChat("system", `대화가 종료되었습니다. (reason: ${data.end_reason ?? "talk_end"})`);
+      } else {
+        // 구버전 UI라면 기존 output에 표시
+        talkOutput.textContent = "대화가 종료되었습니다.";
+      }
+
+      // 입력 비활성화(원하면)
+      const inputEl = document.getElementById("talkInput");
+      if (inputEl) inputEl.disabled = true;
+
+      // topic 상태 초기화
+      activeTopicId = null;
+      topicBadge.textContent = "topic_id: -";
+
+      log({ endpoint: "/talk/end", data });
+      await refreshState();
+      await refreshAdminAll?.();
+    } catch (e) {
+      logErr("talkEnd", e);
+      if (typeof appendChat === "function") {
+        appendChat("system", `대화 종료 실패: ${e?.message || e}`);
+      }
+    } finally {
+      stopSpin();
+    }
+  }
+
+
 
   async function refreshState() {
     startSpin();
@@ -763,7 +1171,6 @@ HTML = r"""
     await fetchAdminSessions();
   }
 
-  // Admin Mutations
   async function adminReset() {
     startSpin();
     try {
@@ -771,13 +1178,16 @@ HTML = r"""
         reset_answers: !!document.getElementById("resetAnswers").checked,
         reset_sessions: !!document.getElementById("resetSessions").checked,
         reset_state: !!document.getElementById("resetState").checked,
+        reset_personality: !!document.getElementById("resetPsanoPersonality").checked,
       };
       const data = await fetchJson("/admin/reset", { method: "POST", body: JSON.stringify(body) });
       log({ endpoint: "/admin/reset", data });
       await refreshState();
       await refreshAdminAll();
       setQuestion(null, "아직 질문 없음");
-      talkOutput.textContent = "아직 응답 없음";
+      activeTopicId = null;
+      topicBadge.textContent = "topic_id: -";
+      clearChatUI();
     } catch (e) {
       logErr("adminReset", e);
     } finally {
@@ -815,36 +1225,23 @@ HTML = r"""
     }
   }
 
-  // xlsx 업로드로 questions import
   async function adminImportQuestions() {
     const fileEl = document.getElementById("admXlsxFile");
-
-    // 토큰 input이 주석/삭제되어도 안전하게
-    const tokenEl = document.getElementById("admAdminToken");
-    const token = (tokenEl ? tokenEl.value : "").trim();
-
     if (!fileEl || !fileEl.files || !fileEl.files.length) {
-      return log("xlsx 파일이 없어. 파일 선택 후 Upload 눌러줘.");
+      return log("xlsx 파일이 없습니다. 파일 선택 후 Upload를 눌러 주세요.");
     }
 
     const file = fileEl.files[0];
     if (!file.name.toLowerCase().endsWith(".xlsx")) {
-      return log("xlsx만 업로드 가능해. (.xlsx)");
+      return log("xlsx만 업로드 가능합니다. (.xlsx)");
     }
 
     startSpin();
     try {
       const fd = new FormData();
       fd.append("file", file);
-
-      // headers는 항상 선언(없으면 {})
-      const headers = {};
-      if (token) headers["X-Admin-Token"] = token;
-
-      const data = await fetchMultipart("/admin/questions/import", fd, headers);
+      const data = await fetchMultipart("/admin/questions/import", fd, {});
       log({ endpoint: "/admin/questions/import", data });
-
-      // 업로드 후 운영 정보 갱신
       await refreshAdminAll();
     } catch (e) {
       logErr("adminImportQuestions", e);
@@ -853,10 +1250,47 @@ HTML = r"""
     }
   }
 
-  // 페이지 로드 시 health + state + admin progress(가볍게)
+  async function personaGenerate() {
+    startSpin();
+    try {
+      const model = (document.getElementById("personaModel").value || "").trim();
+      const maxTokensRaw = (document.getElementById("personaMaxTokens").value || "").trim();
+      const force = !!document.getElementById("personaForce").checked;
+
+      const body = {};
+      if (model) body.model = model;
+
+      if (maxTokensRaw) {
+        const n = parseInt(maxTokensRaw, 10);
+        if (!isNaN(n) && n > 0) body.max_output_tokens = n;
+      }
+
+      if (force) body.force = true;
+
+      const data = await fetchJson("/persona/generate", { method: "POST", body: JSON.stringify(body) });
+      log({ endpoint: "/persona/generate", data });
+      await refreshState();
+      await refreshAdminAll();
+    } catch (e) {
+      logErr("personaGenerate", e);
+    } finally {
+      stopSpin();
+    }
+  }
+
+  // Enter 전송(Shift+Enter 줄바꿈)
+  document.getElementById("talkInput")?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      sendTalk();
+    }
+  });
+
+  // 초기 로드
   checkHealth();
   refreshState();
   fetchAdminProgress();
+  loadTopics();
 </script>
 
 </body>
