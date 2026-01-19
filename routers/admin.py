@@ -11,12 +11,14 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 from database import get_db
+from routers.persona import _generate_persona
 from schemas.admin import (
     AdminSessionsResponse, AdminProgressResponse,
     AdminResetRequest, AdminResetResponse,
     AdminPhaseSetRequest, AdminPhaseSetResponse,
     AdminSetCurrentQuestionRequest, AdminSetCurrentQuestionResponse,
 )
+from schemas.persona import PersonaGenerateResponse, PersonaGenerateRequest
 
 try:
     from openpyxl import load_workbook
@@ -49,7 +51,7 @@ def ensure_psano_state_row(db: Session):
     db.execute(
         text("""
             INSERT INTO psano_state (id, phase, current_question)
-            VALUES (1, 'formation', 1)
+            VALUES (1, 'teach', 1)
         """)
     )
 
@@ -87,11 +89,9 @@ COL_CHOICE_A = "I"      # 선택지_A -> choice_a
 COL_CHOICE_B = "J"      # 선택지_B -> choice_b
 COL_ENABLED = "K"       # 활성화(Y/N) -> enabled
 
-
 class ImportErrorItem(BaseModel):
     row: int
     message: str
-
 
 class AdminQuestionsImportResponse(BaseModel):
     processed: int = 0
@@ -100,7 +100,6 @@ class AdminQuestionsImportResponse(BaseModel):
     unchanged: int = 0
     failed: int = 0
     errors: List[ImportErrorItem] = Field(default_factory=list)
-
 
 def _cell_str(ws, col: str, row: int) -> str:
     v = ws[f"{col}{row}"].value
@@ -138,7 +137,6 @@ def _map_axis_key(axis_ko: str) -> Optional[str]:
         return None
     if k in AXIS_MAP:
         return AXIS_MAP[k]
-    # 혹시 엑셀에 이미 영어 axis_key를 넣는 경우 그대로 허용
     if k in AXIS_MAP.values():
         return k
     return None
@@ -347,12 +345,12 @@ def get_progress(db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail="psano_state(id=1) not found")
 
     phase = st["phase"]
-    if phase not in ("formation", "chat"):
-        phase = "formation"
+    if phase not in ("teach", "talk"):
+        phase = "teach"
 
     current_q = int(st["current_question"])
 
-    if phase == "formation":
+    if phase == "teach":
         answered = max(0, min(MAX_QUESTIONS, current_q - 1))
     else:
         answered = MAX_QUESTIONS
@@ -371,18 +369,36 @@ def get_progress(db: Session = Depends(get_db)):
 @router.post("/reset", response_model=AdminResetResponse)
 def admin_reset(req: AdminResetRequest, db: Session = Depends(get_db)):
     """
-    - 기본: reset_state만 True (formation + 1번 질문으로)
+    - 기본: reset_state만 True (teach + 1번 질문으로)
     - reset_answers: answers 전체 삭제
     - reset_sessions: sessions 전체 삭제
+    - reset_personality: psano_personality 10축 초기화(0)
     """
     try:
         ensure_psano_state_row(db)
 
         if req.reset_answers:
-            db.execute(text("DELETE FROM answers"))
+            db.execute(text("DELETE FROM answers ALTER TABLE answers AUTO_INCREMENT = 1;"))
 
         if req.reset_sessions:
-            db.execute(text("DELETE FROM sessions"))
+            db.execute(text("DELETE FROM sessions ALTER TABLE sessions AUTO_INCREMENT = 1;"))
+
+        if req.reset_personality:
+            # id=1 row가 있다고 가정. 없을 수 있으면 insert 로직을 추가해도 됨.
+            db.execute(text("""
+                UPDATE psano_personality
+                SET self_direction = 0,
+                    conformity = 0,
+                    stimulation = 0,
+                    security = 0,
+                    hedonism = 0,
+                    tradition = 0,
+                    achievement = 0,
+                    benevolence = 0,
+                    power = 0,
+                    universalism = 0
+                WHERE id = 1
+            """))
 
         if req.reset_state:
             # 컬럼이 있을 수도/없을 수도 있으니 안전하게 처리
@@ -390,7 +406,7 @@ def admin_reset(req: AdminResetRequest, db: Session = Depends(get_db)):
                 db.execute(
                     text("""
                         UPDATE psano_state
-                        SET phase = 'formation',
+                        SET phase = 'teach',
                             current_question = 1,
                             formed_at = NULL,
                             persona_prompt = NULL,
@@ -402,7 +418,7 @@ def admin_reset(req: AdminResetRequest, db: Session = Depends(get_db)):
                 db.execute(
                     text("""
                         UPDATE psano_state
-                        SET phase = 'formation',
+                        SET phase = 'teach',
                             current_question = 1
                         WHERE id = 1
                     """)
@@ -414,6 +430,7 @@ def admin_reset(req: AdminResetRequest, db: Session = Depends(get_db)):
             reset_answers=req.reset_answers,
             reset_sessions=req.reset_sessions,
             reset_state=req.reset_state,
+            reset_personality=req.reset_personality
         )
 
     except Exception as e:
@@ -425,21 +442,21 @@ def admin_reset(req: AdminResetRequest, db: Session = Depends(get_db)):
 def admin_set_phase(req: AdminPhaseSetRequest, db: Session = Depends(get_db)):
     """
     테스트용 phase 강제 변경.
-    - formation: formed_at NULL 처리(가능하면)
-    - chat: formed_at 현재시간 기록(가능하면)
+    - teach: formed_at NULL 처리(가능하면)
+    - talk: formed_at 현재시간 기록(가능하면)
     """
-    if req.phase not in ("formation", "chat"):
+    if req.phase not in ("teach", "talk"):
         raise HTTPException(status_code=400, detail="invalid phase")
 
     try:
         ensure_psano_state_row(db)
 
-        if req.phase == "formation":
+        if req.phase == "teach":
             try:
                 db.execute(
                     text("""
                         UPDATE psano_state
-                        SET phase = 'formation',
+                        SET phase = 'teach',
                             formed_at = NULL
                         WHERE id = 1
                     """)
@@ -448,7 +465,7 @@ def admin_set_phase(req: AdminPhaseSetRequest, db: Session = Depends(get_db)):
                 db.execute(
                     text("""
                         UPDATE psano_state
-                        SET phase = 'formation'
+                        SET phase = 'teach'
                         WHERE id = 1
                     """)
                 )
@@ -457,7 +474,7 @@ def admin_set_phase(req: AdminPhaseSetRequest, db: Session = Depends(get_db)):
                 db.execute(
                     text("""
                         UPDATE psano_state
-                        SET phase = 'chat',
+                        SET phase = 'talk',
                             formed_at = :formed_at
                         WHERE id = 1
                     """),
@@ -467,7 +484,7 @@ def admin_set_phase(req: AdminPhaseSetRequest, db: Session = Depends(get_db)):
                 db.execute(
                     text("""
                         UPDATE psano_state
-                        SET phase = 'chat'
+                        SET phase = 'talk'
                         WHERE id = 1
                     """)
                 )
@@ -503,3 +520,19 @@ def admin_set_current_question(req: AdminSetCurrentQuestionRequest, db: Session 
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"db error: {e}")
+
+@router.post("/generate", response_model=PersonaGenerateResponse)
+def admin_persona_generate(req: PersonaGenerateRequest, db: Session = Depends(get_db)):
+    # 관리자 테스트용: force=True면 380 미만이어도 생성 가능
+    try:
+        return _generate_persona(
+            db,
+            force=req.force,
+            model=req.model,
+            allow_under_380=True,   # ✅ 어드민은 테스트 허용
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"admin persona generate failed: {e}")
