@@ -6,7 +6,7 @@ class TalkStartRequest(BaseModel):
     session_id: int = Field(..., ge=1)
     topic_id: int = Field(..., ge=1)
 
-    model: Optional[str] = None
+    model: str = "gpt-4o-mini"
     max_output_tokens: Optional[int] = None
 
 class TalkStartResponse(BaseModel):
@@ -29,7 +29,7 @@ class TalkRequest(BaseModel):
     user_text: str = Field(..., min_length=1, max_length=200)
     topic_id: Optional[int] = Field(None, ge=1)
 
-    model: Optional[str] = None
+    model: str = "gpt-4o-mini"
     max_output_tokens: Optional[int] = None
 
 class TalkResponse(BaseModel):

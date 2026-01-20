@@ -3,7 +3,7 @@ from typing import Optional, Dict, Any
 
 class PersonaGenerateRequest(BaseModel):
     force: bool = False
-    model: Optional[str] = None  # 안 주면 기본값 사용
+    model: str = "gpt-4o-mini"
 
 class PersonaGenerateResponse(BaseModel):
     ok: bool

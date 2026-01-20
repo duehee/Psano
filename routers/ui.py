@@ -196,7 +196,7 @@ HTML = r"""
       margin-top: 8px;
     }
 
-    /* ===== Talk chat UI (NEW) ===== */
+    /* ===== Talk chat UI ===== */
     .chatWrap {
       border: 1px solid var(--line);
       background: rgba(0,0,0,0.18);
@@ -249,6 +249,12 @@ HTML = r"""
       font-size: 12px;
       max-width: 92%;
       text-align: center;
+    }
+
+    /* nudge 스타일(선택) */
+    .bubble.assistant.nudge {
+      border-style: dashed;
+      opacity: 0.92;
     }
 
     .chatMeta {
@@ -364,7 +370,7 @@ HTML = r"""
                 <button class="ghost" onclick="toggleChatMode()">대화 모드</button>
                 <button class="ghost" onclick="clearChatUI()">Clear</button>
                 <button class="ghost" onclick="setExample()">Example</button>
-                <button class="danger" onclick="talkEnd()">Talk End</button>    
+                <button class="danger" onclick="talkEnd()">Talk End</button>
               </div>
             </div>
 
@@ -407,7 +413,6 @@ HTML = r"""
                 </div>
               </div>
 
-              <!-- 기존 Debug용 출력(호환 유지) -->
               <div id="talkOutput" class="out muted small" style="display:none">아직 응답 없음</div>
 
               <div class="sub" style="margin-top:10px">
@@ -534,7 +539,6 @@ HTML = r"""
               <div class="out mono small" id="admSessionsBox">(아직 불러오지 않음)</div>
             </div>
           </div>
-          <!-- Admin end -->
         </div>
       </section>
 
@@ -563,6 +567,8 @@ HTML = r"""
             <span class="mono">/talk/topics</span>,
             <span class="mono">/talk/start</span>,
             <span class="mono">/talk/turn</span>,
+            <span class="mono">/talk/end</span>,
+            <span class="mono">/monologue/nudge</span>,
             <span class="mono">/persona/generate</span>,
             <span class="mono">/admin/progress</span>,
             <span class="mono">/admin/sessions</span>,
@@ -583,6 +589,14 @@ HTML = r"""
   // talk topic state
   let topicsCache = [];
   let activeTopicId = null;
+
+  // nudge 타이머
+  let nudgeTimer = null;
+  const NUDGE_DELAY_MS = 10000;  // 10초
+
+  // nudge / send 중복 방지
+  let isSending = false;
+  let isNudging = false;
 
   const spinner = document.getElementById("spinner");
   const pill = document.getElementById("healthPill");
@@ -683,8 +697,12 @@ HTML = r"""
   }
 
   function setExample() {
-    document.getElementById("talkInput").value = "사노야, 너는 지금 무엇이 되었어?";
-    document.getElementById("talkInput").focus();
+    const el = document.getElementById("talkInput");
+    if (el) {
+      el.value = "사노야, 너는 지금 무엇이 되었어?";
+      el.focus();
+    }
+    startNudgeTimer();
   }
 
   function setSession(id) {
@@ -729,6 +747,12 @@ HTML = r"""
       activeTopicId = null;
       topicBadge.textContent = "topic_id: -";
       clearChatUI();
+      clearNudgeTimer();
+
+      // 입력 비활성(대화 시작 전)
+      const inputEl = document.getElementById("talkInput");
+      if (inputEl) inputEl.disabled = true;
+
     } catch (e) {
       logErr("startSession", e);
     } finally {
@@ -743,11 +767,18 @@ HTML = r"""
       const body = { session_id: sessionId, reason: "completed" };
       const data = await fetchJson("/session/end", { method: "POST", body: JSON.stringify(body) });
       log({ endpoint: "/session/end", data });
+
       setSession(null);
       setQuestion(null, "아직 질문 없음");
+
       activeTopicId = null;
       topicBadge.textContent = "topic_id: -";
       clearChatUI();
+      clearNudgeTimer();
+
+      const inputEl = document.getElementById("talkInput");
+      if (inputEl) inputEl.disabled = true;
+
       await refreshState();
       await refreshAdminAll();
     } catch (e) {
@@ -927,6 +958,54 @@ HTML = r"""
     scrollChatToBottom();
   }
 
+  /* ===== Nudge timer ===== */
+  function clearNudgeTimer() {
+    if (nudgeTimer) {
+      clearTimeout(nudgeTimer);
+      nudgeTimer = null;
+    }
+  }
+
+  function startNudgeTimer() {
+    clearNudgeTimer();
+    if (!sessionId || !activeTopicId) return;
+    if (isNudging) return; // isSending은 제거
+
+    nudgeTimer = setTimeout(async () => {
+      await callNudge();
+    }, NUDGE_DELAY_MS);
+  }
+
+
+  async function callNudge() {
+    if (!sessionId || !activeTopicId) return;
+
+    if (isSending || isNudging) {
+      startNudgeTimer();
+      return;
+    }
+    
+    isNudging = true;
+    try {
+      const body = { session_id: sessionId };
+      const data = await fetchJson("/monologue/nudge", { method: "POST", body: JSON.stringify(body) });
+
+      const nudgeText = data.monologue_text ?? data.text ?? "";
+      if (nudgeText) {
+        const bubble = appendChat("assistant", nudgeText, `${nowTime()} (nudge)`);
+        if (bubble) bubble.classList.add("nudge");
+        talkOutput.textContent = nudgeText;
+        log({ endpoint: "/monologue/nudge", data });
+      }
+    } catch (e) {
+      logErr("callNudge", e);
+    } finally {
+      isNudging = false;
+      // ✅ nudge 이후에도 다시 타이머를 걸고 싶으면 여기서 재시작
+      // startNudgeTimer();
+    }
+  }
+
   // talk start
   async function talkStart() {
     if (!sessionId) return log("세션이 없습니다. 먼저 Start를 눌러 주세요.");
@@ -951,13 +1030,16 @@ HTML = r"""
       clearChatUI();
       appendChat("system", `대화를 시작합니다. (topic_id: ${tid})`);
       appendChat("assistant", first || "(empty)", nowTime());
-      
+
       const inputEl = document.getElementById("talkInput");
       if (inputEl) inputEl.disabled = false;
 
       talkOutput.textContent = first || "(empty)";
       log({ endpoint: "/talk/start", data });
       await refreshState();
+
+      // ✅ 대화 시작 후 nudge 타이머 시작
+      startNudgeTimer();
     } catch (e) {
       logErr("talkStart", e);
       appendChat("system", `시작 실패: ${e?.message || e}`);
@@ -975,11 +1057,14 @@ HTML = r"""
 
     const tid = activeTopicId ?? parseInt(topicSelect.value || "1", 10);
 
+    // 유저가 말했으니 nudge 타이머 리셋(지금부터 무응답 감지)
+    startNudgeTimer();
+
     // 유저 말풍선
     appendChat("user", txt, nowTime());
     if (inputEl) inputEl.value = "";
-  
-    // 타이핑 버블(이 버블을 '최종 응답 버블'로 바꿀 것)
+
+    // 타이핑 버블
     const typingRow = document.createElement("div");
     typingRow.className = "bubbleRow assistant";
 
@@ -996,6 +1081,9 @@ HTML = r"""
     chatList.appendChild(typingRow);
     scrollChatToBottom();
 
+    isSending = true;
+    clearNudgeTimer(); // ✅ 요청 중에는 nudge가 끼지 않도록
+
     startSpin();
     try {
       // 1) /talk/turn 우선
@@ -1009,13 +1097,15 @@ HTML = r"""
           data.text ??
           "";
 
-        // 타이핑 버블을 최종 응답으로 교체 (추가 append 하지 않음)
         typingBubble.innerHTML = escapeHtml(out || "(empty)");
         typingMeta.textContent = nowTime();
 
         talkOutput.textContent = out || "(empty)";
         log({ endpoint: "/talk/turn", data });
         await refreshState();
+
+        // ✅ 사노 응답 후 무응답 타이머 재시작
+        startNudgeTimer();
         return;
       } catch (e1) {
         const msg = (e1?.message || "");
@@ -1038,37 +1128,37 @@ HTML = r"""
       talkOutput.textContent = out2 || "(empty)";
       log({ endpoint: "/talk (fallback)", data: data2 });
       await refreshState();
+
+      // ✅ 사노 응답 후 무응답 타이머 재시작
+      startNudgeTimer();
     } catch (e) {
       logErr("sendTalk", e);
       typingBubble.innerHTML = escapeHtml(`에러: ${e?.message || e}`);
       typingMeta.textContent = nowTime();
       appendChat("system", `전송 실패: ${e?.message || e}`);
+      startNudgeTimer();
     } finally {
       stopSpin();
+      isSending = false;
+      startNudgeTimer();
     }
   }
-  
+
   async function talkEnd() {
     if (!sessionId) return log("세션이 없습니다. 먼저 Start를 눌러 주세요.");
+
+    clearNudgeTimer();
 
     startSpin();
     try {
       const body = { session_id: sessionId };
       const data = await fetchJson("/talk/end", { method: "POST", body: JSON.stringify(body) });
 
-      // 채팅창에 시스템 메시지
-      if (typeof appendChat === "function") {
-        appendChat("system", `대화가 종료되었습니다. (reason: ${data.end_reason ?? "talk_end"})`);
-      } else {
-        // 구버전 UI라면 기존 output에 표시
-        talkOutput.textContent = "대화가 종료되었습니다.";
-      }
+      appendChat("system", `대화가 종료되었습니다. (reason: ${data.end_reason ?? "talk_end"})`);
 
-      // 입력 비활성화(원하면)
       const inputEl = document.getElementById("talkInput");
       if (inputEl) inputEl.disabled = true;
 
-      // topic 상태 초기화
       activeTopicId = null;
       topicBadge.textContent = "topic_id: -";
 
@@ -1077,15 +1167,11 @@ HTML = r"""
       await refreshAdminAll?.();
     } catch (e) {
       logErr("talkEnd", e);
-      if (typeof appendChat === "function") {
-        appendChat("system", `대화 종료 실패: ${e?.message || e}`);
-      }
+      appendChat("system", `대화 종료 실패: ${e?.message || e}`);
     } finally {
       stopSpin();
     }
   }
-
-
 
   async function refreshState() {
     startSpin();
@@ -1188,6 +1274,11 @@ HTML = r"""
       activeTopicId = null;
       topicBadge.textContent = "topic_id: -";
       clearChatUI();
+      clearNudgeTimer();
+
+      const inputEl = document.getElementById("talkInput");
+      if (inputEl) inputEl.disabled = true;
+
     } catch (e) {
       logErr("adminReset", e);
     } finally {
@@ -1286,11 +1377,20 @@ HTML = r"""
     }
   });
 
+  // ✅ 입력 중이면 무응답 타이머 리셋(입력 중인데 nudge 튀는 거 방지)
+  document.getElementById("talkInput")?.addEventListener("input", () => {
+    startNudgeTimer();
+  });
+
   // 초기 로드
   checkHealth();
   refreshState();
   fetchAdminProgress();
   loadTopics();
+
+  // 초기에는 talk input 비활성 (talkStart 성공 시 활성)
+  const _initInput = document.getElementById("talkInput");
+  if (_initInput) _initInput.disabled = true;
 </script>
 
 </body>

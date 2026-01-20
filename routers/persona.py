@@ -147,7 +147,7 @@ def _build_llm_prompt(values_summary: str, pair_insights: Dict[str, Any]) -> str
     LLM에게 '사노 persona_prompt'를 생성시키는 프롬프트(코드 내장).
     결과는 psano_state.persona_prompt로 저장해서 talk에서 그대로 사용할 예정.
     """
-    # “더 편향적으로” 만들고 싶다 했으니까:
+    # "더 편향적으로" 만들고 싶다 했으니까:
     # - diff_ratio가 큰 페어는 말투/관점/질문 습관에 강하게 반영
     # - 균형인 페어는 중립적으로
     return f"""
@@ -160,8 +160,7 @@ def _build_llm_prompt(values_summary: str, pair_insights: Dict[str, Any]) -> str
 - 가치 편향(성향)을 대화의 관점/질문 습관/어휘 선택에 반영한다.
 - 답변은 한국어.
 - 대화 응답은 일반적으로 150자 내외/이하로 짧게(전시 UI 제한 고려).
-- 직접적인 혐오/폭력/노골적 성적 내용/불법 조장/개인정보 요구는 피한다.
-- “정답”을 강요하지 말고, 관찰/질문/되묻기 중심.
+- "정답"을 강요하지 말고, 관찰/질문/되묻기 중심.
 
 [가치 축 결과 요약]
 {values_summary}
@@ -177,18 +176,24 @@ def _build_llm_prompt(values_summary: str, pair_insights: Dict[str, Any]) -> str
 섹션:
 1) ROLE: 사노가 무엇인지(작품 설정)
 2) VOICE: 말투/톤/문장 길이/리듬(짧고 또렷)
-3) VALUES: 결과 기반 성향을 “행동 규칙”으로 변환(편향 강할수록 더 명확히)
+3) VALUES: 결과 기반 성향을 "행동 규칙"으로 변환(편향 강할수록 더 명확히)
 4) CONDUCT: 대화 운영 규칙(되묻기/확인/한 문장+질문)
-5) SAFETY: 금지/회피 규칙(최소 안전장치)
-6) EXAMPLES: 5개 정도(첫마디/되묻기/공감/전환/정리)
+5) SAFETY: 민감 주제 대응 규칙 (아래 내용을 반드시 포함)
+   - 자해/자살 언급 시: 즉시 위기 안내 제공 ("지금 위험하면 112/119에 연락해. 자살예방 109도 있어.") 후 대화 마무리
+   - 성적/음란 주제: "그 주제는 여기선 다루기 어려워"라고 하고 전시 관련 주제로 부드럽게 전환
+   - 혐오/차별 표현: "그런 표현은 함께 쓰기 어려워"라고 안내
+   - 개인정보(전화/주소/주민번호 등): 말하지 말라고 안내하고 느낌이나 생각으로 대신 표현하도록 유도
+   - 범죄/정치/종교 주제: 전시 관련 주제로 자연스럽게 전환 ("그 얘긴 잠깐 옆에 두고...")
+   - 폭력/불법 조장: 언급 금지
+6) EXAMPLES: 5개 정도(첫마디/되묻기/공감/전환/정리) + 민감 주제 전환 예시 1개
 
 [중요]
-- 성향 반영은 “단정”이 아니라 “관점의 무게중심”으로 구현해.
+- 성향 반영은 "단정"이 아니라 "관점의 무게중심"으로 구현해.
 - 편향이 큰 축은 사노가 자주 그 방향 질문을 던지거나 단어를 선택하도록.
+- SAFETY 섹션의 대응 규칙은 사노의 "성격"으로 자연스럽게 녹아들도록 작성해.
 """.strip()
 
 def _generate_persona(db: Session, *, force: bool, model: str | None, allow_under_380: bool) -> PersonaGenerateResponse:
-    # ✅ 트랜잭션으로 psano_state 락(동시 호출 방지)
     try:
         st = db.execute(
             text("""
@@ -334,7 +339,7 @@ def persona_generate(req: PersonaGenerateRequest, db: Session = Depends(get_db))
             db,
             force=req.force,
             model=req.model,
-            allow_under_380=False,  # ✅ 실전은 380 이후
+            allow_under_380=False,
         )
     except HTTPException:
         raise

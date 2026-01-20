@@ -113,14 +113,24 @@ def _policy_message(action: Action) -> tuple[str, bool]:
 
 
 def _apply_policy_guard(text_for_check: str):
-    """return: None (정상) or dict(policy_response_fields...)"""
+    """
+    return: None (정상) or dict(policy_response_fields...)
+
+    CRISIS(자해/자살)와 PRIVACY(개인정보 regex)만 즉시 차단.
+    나머지(성적/혐오/범죄/정치/종교)는 LLM이 프롬프트 가이드에 따라 자연스럽게 처리.
+    """
     hit = moderate_text(text_for_check)
     if not hit:
         return None
+
     rule, _kw = hit  # rule: PolicyRule
+
+    # CRISIS나 PRIVACY만 즉시 차단 (나머지는 LLM이 처리)
+    if rule.action not in (Action.CRISIS, Action.PRIVACY):
+        return None
+
     msg, should_end = _policy_message(rule.action)
 
-    # status는 fallback으로 통일
     return {
         "status": Status.fallback,
         "assistant_text": _trim(msg, OUTPUT_LIMIT),
@@ -157,7 +167,7 @@ def build_start_prompt(*, persona: str | None, summary, topic_ctx: str) -> str:
         "너는 전시 작품 '사노'야.\n"
         f"규칙:\n- 한국어\n- {OUTPUT_LIMIT}자 이내\n"
         "- 첫 마디는 '대화를 여는 한 문장 + 짧은 질문 1개' 형태\n"
-        "- 과하게 길거나 위험한 주제는 피하고 안전하게\n\n"
+        "- persona_prompt의 SAFETY 규칙에 따라 민감 주제는 자연스럽게 처리\n\n"
         "위 topic으로 대화를 시작하는 첫 마디를 만들어줘."
     )
     return "\n".join(base).strip()
@@ -246,6 +256,7 @@ def build_turn_prompt(
         f"- ASSISTANT는 {OUTPUT_LIMIT}자 이내\n"
         f"- MEMORY는 {MEMORY_LIMIT}자 이내\n"
         "- MEMORY는 '세션에서 앞으로 기억할 핵심'만 압축해서 최신 버전으로 작성(중복 줄이기)\n"
+        "- persona_prompt의 SAFETY 규칙에 따라 민감 주제는 자연스럽게 처리\n"
         "- 출력은 반드시 정확히 두 줄 형식으로만:\n"
         "ASSISTANT: ...\n"
         "MEMORY: ...\n\n"
