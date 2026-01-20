@@ -2,7 +2,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from fastapi import FastAPI
-from routers import health, session, question, answer, state, talk, ui, admin, persona
+from routers import health, session, question, answer, state, talk, ui, admin, persona, monolouge
 
 app = FastAPI(title="Psano Backend", version="0.1.0")
 
@@ -15,3 +15,4 @@ app.include_router(talk.router, prefix="/talk", tags=["talk"])
 app.include_router(ui.router, prefix="/ui", tags=["ui"])
 app.include_router(admin.router, prefix="/admin", tags=["admin"])
 app.include_router(persona.router, prefix="/persona", tags=["persona"])
+app.include_router(monolouge.router, prefix="/monologue", tags=["monologue"])
