@@ -17,7 +17,7 @@ from schemas.admin import (
     AdminPhaseSetRequest, AdminPhaseSetResponse,
     AdminSetCurrentQuestionRequest, AdminSetCurrentQuestionResponse,
     ImportErrorItem, AdminQuestionsImportResponse, AdminSettingsImportResponse,
-    AdminPersonalitySetRequest, AdminPersonalitySetResponse,
+    AdminPersonalitySetRequest, AdminPersonalitySetResponse, AdminPersonalityGetResponse,
 )
 from schemas.persona import PersonaGenerateResponse, PersonaGenerateRequest
 
@@ -609,6 +609,51 @@ def admin_set_current_question(req: AdminSetCurrentQuestionRequest, db: Session 
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"db error: {e}")
+
+@router.get("/personality", response_model=AdminPersonalityGetResponse)
+def admin_personality_get(
+    db: Session = Depends(get_db),
+    x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
+):
+    """
+    GET /admin/personality
+    psano_personality(id=1) 10개 축 조회
+    """
+    _check_admin_token(x_admin_token)
+
+    try:
+        ensure_psano_personality_row(db)
+
+        row = db.execute(
+            text("""
+                SELECT self_direction, conformity, stimulation, security, hedonism,
+                       tradition, achievement, benevolence, power, universalism
+                FROM psano_personality
+                WHERE id = 1
+            """)
+        ).mappings().first()
+
+        if not row:
+            raise HTTPException(status_code=500, detail="psano_personality(id=1) not found")
+
+        return AdminPersonalityGetResponse(
+            self_direction=int(row["self_direction"]),
+            conformity=int(row["conformity"]),
+            stimulation=int(row["stimulation"]),
+            security=int(row["security"]),
+            hedonism=int(row["hedonism"]),
+            tradition=int(row["tradition"]),
+            achievement=int(row["achievement"]),
+            benevolence=int(row["benevolence"]),
+            power=int(row["power"]),
+            universalism=int(row["universalism"]),
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"db error: {e}")
+
 
 @router.post("/personality/set", response_model=AdminPersonalitySetResponse)
 def admin_personality_set(

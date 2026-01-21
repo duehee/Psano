@@ -45,42 +45,16 @@ def _epoch_to_kst_iso(ts):
 
 
 def _read_session_row(db: Session, sid: int):
-    """
-    sessions 테이블이 버전별로 컬럼이 다를 수 있어서 안전 조회:
-    - (신형) topic_id, talk_memory, turn_count 포함
-    - (구형) 없으면 fallback
-    """
-    try:
-        return db.execute(
-            text("""
-                SELECT id, visitor_name, started_at, ended_at, end_reason,
-                       topic_id, talk_memory, turn_count
-                FROM sessions
-                WHERE id = :sid
-            """),
-            {"sid": sid}
-        ).mappings().first()
-    except Exception:
-        # 구형 호환
-        try:
-            return db.execute(
-                text("""
-                    SELECT id, visitor_name, started_at, ended_at, end_reason
-                    FROM sessions
-                    WHERE id = :sid
-                """),
-                {"sid": sid}
-            ).mappings().first()
-        except Exception:
-            # 더 구형 호환(end_reason도 없던 시절)
-            return db.execute(
-                text("""
-                    SELECT id, visitor_name, started_at, ended_at
-                    FROM sessions
-                    WHERE id = :sid
-                """),
-                {"sid": sid}
-            ).mappings().first()
+    """sessions 테이블에서 세션 정보 조회"""
+    return db.execute(
+        text("""
+            SELECT id, visitor_name, started_at, ended_at, end_reason,
+                   topic_id, talk_memory, turn_count
+            FROM sessions
+            WHERE id = :sid
+        """),
+        {"sid": sid}
+    ).mappings().first()
 
 
 @router.post("/start", response_model=SessionStartResponse)

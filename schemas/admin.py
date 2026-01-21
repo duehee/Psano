@@ -21,6 +21,18 @@ class AdminPersonalitySetResponse(BaseModel):
     ok: bool
     updated: bool
 
+class AdminPersonalityGetResponse(BaseModel):
+    self_direction: int
+    conformity: int
+    stimulation: int
+    security: int
+    hedonism: int
+    tradition: int
+    achievement: int
+    benevolence: int
+    power: int
+    universalism: int
+
 class AdminSessionItem(BaseModel):
     id: int
     visitor_name: str

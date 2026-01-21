@@ -2,7 +2,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from fastapi import FastAPI
-from routers import health, session, question, answer, state, talk, ui, admin, persona, monolouge
+from routers import health, session, question, answer, state, talk, ui, admin, persona, monologue
 
 app = FastAPI(title="Psano Backend", version="0.1.0")
 

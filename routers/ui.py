@@ -541,6 +541,66 @@ HTML = r"""
 
               <div class="row" style="width:100%">
                 <div style="flex:1; min-width: 220px;">
+                  <div class="muted small">Personality set (test)</div>
+                  <div class="sub">GET/POST <span class="mono">/admin/personality</span></div>
+                </div>
+                <div class="row">
+                  <button onclick="fetchAdminPersonality()">Load</button>
+                  <button class="primary" onclick="adminSetPersonality()">Apply</button>
+                </div>
+              </div>
+
+              <div style="display:grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-top: 10px;">
+                <div>
+                  <label class="muted small">self_direction</label>
+                  <input id="pSelfDirection" type="number" value="0" style="width:100%" />
+                </div>
+                <div>
+                  <label class="muted small">conformity</label>
+                  <input id="pConformity" type="number" value="0" style="width:100%" />
+                </div>
+                <div>
+                  <label class="muted small">stimulation</label>
+                  <input id="pStimulation" type="number" value="0" style="width:100%" />
+                </div>
+                <div>
+                  <label class="muted small">security</label>
+                  <input id="pSecurity" type="number" value="0" style="width:100%" />
+                </div>
+                <div>
+                  <label class="muted small">hedonism</label>
+                  <input id="pHedonism" type="number" value="0" style="width:100%" />
+                </div>
+                <div>
+                  <label class="muted small">tradition</label>
+                  <input id="pTradition" type="number" value="0" style="width:100%" />
+                </div>
+                <div>
+                  <label class="muted small">achievement</label>
+                  <input id="pAchievement" type="number" value="0" style="width:100%" />
+                </div>
+                <div>
+                  <label class="muted small">benevolence</label>
+                  <input id="pBenevolence" type="number" value="0" style="width:100%" />
+                </div>
+                <div>
+                  <label class="muted small">power</label>
+                  <input id="pPower" type="number" value="0" style="width:100%" />
+                </div>
+                <div>
+                  <label class="muted small">universalism</label>
+                  <input id="pUniversalism" type="number" value="0" style="width:100%" />
+                </div>
+              </div>
+
+              <div class="hint">
+                psano_personality(id=1) 10개 축을 직접 설정합니다. Load로 현재 값을 불러오고, Apply로 저장합니다.
+              </div>
+
+              <div class="sep"></div>
+
+              <div class="row" style="width:100%">
+                <div style="flex:1; min-width: 220px;">
                   <div class="muted small">최근 세션</div>
                 </div>
                 <div class="row">
@@ -1405,6 +1465,52 @@ HTML = r"""
       await refreshAdminAll();
     } catch (e) {
       logErr("personaGenerate", e);
+    } finally {
+      stopSpin();
+    }
+  }
+
+  async function fetchAdminPersonality() {
+    startSpin();
+    try {
+      const data = await fetchJson("/admin/personality");
+      document.getElementById("pSelfDirection").value = data.self_direction ?? 0;
+      document.getElementById("pConformity").value = data.conformity ?? 0;
+      document.getElementById("pStimulation").value = data.stimulation ?? 0;
+      document.getElementById("pSecurity").value = data.security ?? 0;
+      document.getElementById("pHedonism").value = data.hedonism ?? 0;
+      document.getElementById("pTradition").value = data.tradition ?? 0;
+      document.getElementById("pAchievement").value = data.achievement ?? 0;
+      document.getElementById("pBenevolence").value = data.benevolence ?? 0;
+      document.getElementById("pPower").value = data.power ?? 0;
+      document.getElementById("pUniversalism").value = data.universalism ?? 0;
+      log({ endpoint: "/admin/personality", data });
+    } catch (e) {
+      logErr("fetchAdminPersonality", e);
+    } finally {
+      stopSpin();
+    }
+  }
+
+  async function adminSetPersonality() {
+    startSpin();
+    try {
+      const body = {
+        self_direction: parseInt(document.getElementById("pSelfDirection").value || "0", 10),
+        conformity: parseInt(document.getElementById("pConformity").value || "0", 10),
+        stimulation: parseInt(document.getElementById("pStimulation").value || "0", 10),
+        security: parseInt(document.getElementById("pSecurity").value || "0", 10),
+        hedonism: parseInt(document.getElementById("pHedonism").value || "0", 10),
+        tradition: parseInt(document.getElementById("pTradition").value || "0", 10),
+        achievement: parseInt(document.getElementById("pAchievement").value || "0", 10),
+        benevolence: parseInt(document.getElementById("pBenevolence").value || "0", 10),
+        power: parseInt(document.getElementById("pPower").value || "0", 10),
+        universalism: parseInt(document.getElementById("pUniversalism").value || "0", 10),
+      };
+      const data = await fetchJson("/admin/personality/set", { method: "POST", body: JSON.stringify(body) });
+      log({ endpoint: "/admin/personality/set", data });
+    } catch (e) {
+      logErr("adminSetPersonality", e);
     } finally {
       stopSpin();
     }

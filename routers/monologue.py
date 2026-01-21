@@ -3,7 +3,6 @@ import json
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import text
-from openai import OpenAI
 
 from database import get_db
 from schemas.common import Status
@@ -14,10 +13,10 @@ from schemas.monologue import (
 
 # (선택) 정책 필터 재사용하고 싶으면 import
 from routers.talk_policy import moderate_text, generate_policy_response, Action
+from services.llm_service import call_llm
 
 
 OUTPUT_LIMIT = 150
-client = OpenAI()
 
 router = APIRouter()
 
@@ -219,24 +218,23 @@ def idle_monologue(req: MonologueRequest, db: Session = Depends(get_db)):
             "stage_name_en": stage.get("stage_name_en") or "Nascent",
         }
 
-    status = Status.ok
-    fallback_code = None
-    monologue_text = ""
+    # LLM 호출 (공통 래퍼: timeout 8초, retry 2회)
+    fallback_text = FALLBACK_LINES[int(time.time()) % len(FALLBACK_LINES)]
+    result = call_llm(
+        prompt,
+        model=req.model,
+        max_tokens=req.max_output_tokens or 120,
+        fallback_text=fallback_text,
+    )
 
-    try:
-        resp = client.chat.completions.create(
-            model=req.model or "gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=req.max_output_tokens or 120,
-        )
-        monologue_text = _trim(resp.choices[0].message.content or "", OUTPUT_LIMIT)
-        if not monologue_text:
-            raise RuntimeError("empty output")
+    if result.success:
         status = Status.ok
-    except Exception:
+        monologue_text = _trim(result.content, OUTPUT_LIMIT)
+        fallback_code = None
+    else:
         status = Status.fallback
-        fallback_code = "LLM_FAILED"
-        monologue_text = _trim(FALLBACK_LINES[int(time.time()) % len(FALLBACK_LINES)], OUTPUT_LIMIT)
+        monologue_text = _trim(result.content, OUTPUT_LIMIT)
+        fallback_code = result.fallback_code
 
     return {
         "status": status,
@@ -270,48 +268,32 @@ def _topic_context(db: Session, topic_id: int) -> str:
 
 
 def _read_session_talk_fields(db: Session, sid: int):
-    # 컬럼 버전 차이 안전 처리
-    try:
-        return db.execute(
-            text("""
-                SELECT id, ended_at, topic_id, talk_memory, turn_count
-                FROM sessions
-                WHERE id = :sid
-            """),
-            {"sid": int(sid)}
-        ).mappings().first()
-    except Exception:
-        return db.execute(
-            text("""
-                SELECT id, ended_at
-                FROM sessions
-                WHERE id = :sid
-            """),
-            {"sid": int(sid)}
-        ).mappings().first()
+    """세션의 talk 관련 필드 조회"""
+    return db.execute(
+        text("""
+            SELECT id, ended_at, topic_id, talk_memory, turn_count
+            FROM sessions
+            WHERE id = :sid
+        """),
+        {"sid": int(sid)}
+    ).mappings().first()
 
 
 def _get_recent_messages(db: Session, sid: int, limit: int = 6):
+    """talk_messages에서 최근 메시지 조회 (시간순 정렬)"""
     limit = max(2, min(int(limit or 6), 12))
-
-    # created_at이 있으면 그걸 쓰고, 없으면 id로 정렬
-    try:
-        rows = db.execute(
-            text("""
-                SELECT user_text, assistant_text
-                FROM talk_messages
-                WHERE session_id = :sid
-                ORDER BY id DESC
-                LIMIT :lim
-            """),
-            {"sid": int(sid), "lim": int(limit)}
-        ).mappings().all()
-    except Exception:
-        rows = []
-
+    rows = db.execute(
+        text("""
+            SELECT user_text, assistant_text
+            FROM talk_messages
+            WHERE session_id = :sid
+            ORDER BY id DESC
+            LIMIT :lim
+        """),
+        {"sid": int(sid), "lim": int(limit)}
+    ).mappings().all()
     # 최신 -> 과거 순으로 왔으니 뒤집어서 시간순으로
-    rows = list(rows)[::-1]
-    return rows
+    return list(rows)[::-1]
 
 
 def build_nudge_prompt(*, persona: str | None, values_summary, topic_ctx: str, recent_msgs: list, talk_memory: str | None):
@@ -415,58 +397,39 @@ def talk_nudge(req: NudgeRequest, db: Session = Depends(get_db)):
         fallback_code = policy["fallback_code"]
         status = Status.fallback
     else:
-        status = Status.ok
-        fallback_code = None
-        nudge_text = ""
+        # LLM 호출 (공통 래퍼: timeout 8초, retry 2회)
+        fallback_text = FALLBACK_LINES[int(time.time()) % len(FALLBACK_LINES)]
+        result = call_llm(
+            prompt,
+            model=req.model,
+            max_tokens=req.max_output_tokens or 90,
+            fallback_text=fallback_text,
+        )
 
-        try:
-            resp = client.chat.completions.create(
-                model=req.model or "gpt-4o-mini",
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=req.max_output_tokens or 90,
-            )
-            nudge_text = _trim(resp.choices[0].message.content or "", OUTPUT_LIMIT)
-            if not nudge_text:
-                raise RuntimeError("empty output")
+        if result.success:
             status = Status.ok
-        except Exception:
+            nudge_text = _trim(result.content, OUTPUT_LIMIT)
+            fallback_code = None
+        else:
             status = Status.fallback
-            fallback_code = "LLM_FAILED"
-            nudge_text = _trim(FALLBACK_LINES[int(time.time()) % len(FALLBACK_LINES)], OUTPUT_LIMIT)
+            nudge_text = _trim(result.content, OUTPUT_LIMIT)
+            fallback_code = result.fallback_code
 
     # 4) talk_messages 저장 (nudge 마킹)
-    try:
-        try:
-            db.execute(
-                text("""
-                    INSERT INTO talk_messages (session_id, topic_id, user_text, assistant_text, status)
-                    VALUES (:sid, :tid, :u, :a, :s)
-                """),
-                {
-                    "sid": sid,
-                    "tid": int(topic_id),
-                    "u": "[nudge]",
-                    "a": nudge_text,
-                    "s": status.value if hasattr(status, "value") else str(status),
-                }
-            )
-        except Exception:
-            db.execute(
-                text("""
-                    INSERT INTO talk_messages (session_id, user_text, assistant_text, status)
-                    VALUES (:sid, :u, :a, :s)
-                """),
-                {
-                    "sid": sid,
-                    "u": "[nudge]",
-                    "a": nudge_text,
-                    "s": status.value if hasattr(status, "value") else str(status),
-                }
-            )
-        db.commit()
-    except Exception:
-        db.rollback()
-        pass
+    db.execute(
+        text("""
+            INSERT INTO talk_messages (session_id, topic_id, user_text, assistant_text, status)
+            VALUES (:sid, :tid, :u, :a, :s)
+        """),
+        {
+            "sid": sid,
+            "tid": int(topic_id),
+            "u": "[nudge]",
+            "a": nudge_text,
+            "s": status.value,
+        }
+    )
+    db.commit()
 
     return {
         "status": status,

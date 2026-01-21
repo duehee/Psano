@@ -19,7 +19,7 @@ from schemas.talk import (
 from schemas.common import Status
 from routers.talk_policy import moderate_text, generate_policy_response, Action
 from database import get_db
-from openai import OpenAI
+from services.llm_service import call_llm
 
 INPUT_LIMIT = 200
 OUTPUT_LIMIT = 150
@@ -30,7 +30,6 @@ MEMORY_LIMIT = 600
 # 최근 턴 몇 개를 넣을지 (talk_messages 한 행 = 1턴)
 RECENT_TURNS = 3
 
-client = OpenAI()
 router = APIRouter()
 
 FALLBACK_LINES = [
@@ -170,40 +169,18 @@ def _format_recent_turns(rows) -> str:
 
 def _get_recent_turns(db: Session, session_id: int, limit_rows: int) -> str:
     """
-    talk_messages: 한 행이 한 턴(user_text + assistant_text)
-    최근 limit_rows개를 가져와서 오래된 -> 최신 순서로 포맷.
+    talk_messages에서 최근 limit_rows개를 가져와서 오래된 -> 최신 순서로 포맷.
     """
-    rows = []
-    try:
-        rows = db.execute(
-            text(
-                f"""
-                SELECT id, user_text, assistant_text
-                FROM talk_messages
-                WHERE session_id = :sid
-                ORDER BY id DESC
-                LIMIT {int(limit_rows)}
-                """
-            ),
-            {"sid": session_id},
-        ).mappings().all()
-    except Exception:
-        # id가 없거나 DB가 달라서 실패할 때 최소 호환(created_at 기준)
-        try:
-            rows = db.execute(
-                text(
-                    f"""
-                    SELECT user_text, assistant_text
-                    FROM talk_messages
-                    WHERE session_id = :sid
-                    ORDER BY created_at DESC
-                    LIMIT {int(limit_rows)}
-                    """
-                ),
-                {"sid": session_id},
-            ).mappings().all()
-        except Exception:
-            rows = []
+    rows = db.execute(
+        text("""
+            SELECT id, user_text, assistant_text
+            FROM talk_messages
+            WHERE session_id = :sid
+            ORDER BY id DESC
+            LIMIT :lim
+        """),
+        {"sid": session_id, "lim": int(limit_rows)},
+    ).mappings().all()
 
     rows = list(rows or [])
     rows.reverse()  # 최신->과거로 뽑았으니 뒤집어서 과거->최신
@@ -270,27 +247,18 @@ def _parse_assistant_and_memory(raw: str) -> tuple[str, str]:
     return _trim(assistant, OUTPUT_LIMIT), _trim(memory, MEMORY_LIMIT)
 
 
-def _try_update_session_memory_and_count(db: Session, session_id: int, memory: str):
-    """
-    sessions.talk_memory / turn_count 업데이트.
-    컬럼 없으면 조용히 무시.
-    """
-    try:
-        db.execute(
-            text(
-                """
-                UPDATE sessions
-                SET talk_memory = :mem,
-                    turn_count = COALESCE(turn_count, 0) + 1
-                WHERE id = :sid
-                """
-            ),
-            {"sid": session_id, "mem": _trim(memory or "", MEMORY_LIMIT)},
-        )
-        db.commit()
-    except Exception:
-        db.rollback()
-        # 컬럼 없거나 제약 문제면 무시
+def _update_session_memory_and_count(db: Session, session_id: int, memory: str):
+    """sessions.talk_memory / turn_count 업데이트"""
+    db.execute(
+        text("""
+            UPDATE sessions
+            SET talk_memory = :mem,
+                turn_count = COALESCE(turn_count, 0) + 1
+            WHERE id = :sid
+        """),
+        {"sid": session_id, "mem": _trim(memory or "", MEMORY_LIMIT)},
+    )
+    db.commit()
 
 @router.post("/start", response_model=TalkStartResponse)
 def talk_start(req: TalkStartRequest, db: Session = Depends(get_db)):
@@ -334,25 +302,17 @@ def talk_start(req: TalkStartRequest, db: Session = Depends(get_db)):
     if sess.get("topic_id") is not None and int(sess["topic_id"]) != int(req.topic_id):
         raise HTTPException(status_code=409, detail="topic mismatch for this session")
 
-    # talk 시작 최초 1회만 초기화(teach에서 만들어진 세션이라도 여기서만)
+    # talk 시작 최초 1회만 초기화
     if sess.get("topic_id") is None:
-        try:
-            db.execute(
-                text(
-                    """
-                    UPDATE sessions
-                    SET topic_id    = :tid,
-                        talk_memory = '',
-                        turn_count  = 0
-                    WHERE id = :sid
-                    """
-                ),
-                {"sid": req.session_id, "tid": int(req.topic_id)},
-            )
-            db.commit()
-        except Exception:
-            db.rollback()
-            # 컬럼 없으면(마이그레이션 전) 그냥 통과
+        db.execute(
+            text("""
+                UPDATE sessions
+                SET topic_id = :tid, talk_memory = '', turn_count = 0
+                WHERE id = :sid
+            """),
+            {"sid": req.session_id, "tid": int(req.topic_id)},
+        )
+        db.commit()
 
     # 3) topic 로드
     topic_ctx = _topic_context(db, req.topic_id)
@@ -364,28 +324,23 @@ def talk_start(req: TalkStartRequest, db: Session = Depends(get_db)):
         topic_ctx=topic_ctx,
     )
 
-    # 5) GPT 호출 (실패하면 fallback)
-    status = Status.ok
-    fallback_code = None
-    assistant_first_text = ""
+    # 5) LLM 호출 (공통 래퍼: timeout 8초, retry 2회)
+    fallback_text = FALLBACK_LINES[int(time.time()) % len(FALLBACK_LINES)]
+    result = call_llm(
+        prompt,
+        model=getattr(req, "model", None),
+        max_tokens=getattr(req, "max_output_tokens", None) or 180,
+        fallback_text=fallback_text,
+    )
 
-    try:
-        resp = client.chat.completions.create(
-            model=getattr(req, "model", None) or "gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=getattr(req, "max_output_tokens", None) or 180,
-        )
-        assistant_first_text = _trim(resp.choices[0].message.content or "", OUTPUT_LIMIT)
-        if not assistant_first_text:
-            raise RuntimeError("empty output")
+    if result.success:
         status = Status.ok
-    except Exception:
+        assistant_first_text = _trim(result.content, OUTPUT_LIMIT)
+        fallback_code = None
+    else:
         status = Status.fallback
-        fallback_code = "LLM_FAILED"
-        assistant_first_text = _trim(
-            FALLBACK_LINES[int(time.time()) % len(FALLBACK_LINES)],
-            OUTPUT_LIMIT,
-        )
+        assistant_first_text = _trim(result.content, OUTPUT_LIMIT)
+        fallback_code = result.fallback_code
 
     # start는 저장 안 함
     return {
@@ -461,43 +416,21 @@ def talk_turn(req: TalkRequest, db: Session = Depends(get_db)):
         assistant_text = policy["assistant_text"]
         fallback_code = policy["fallback_code"]
 
-        # 로그 저장(talk_messages) - topic_id 포함
-        try:
-            try:
-                db.execute(
-                    text(
-                        """
-                        INSERT INTO talk_messages (session_id, topic_id, user_text, assistant_text, status)
-                        VALUES (:sid, :tid, :u, :a, :s)
-                        """
-                    ),
-                    {
-                        "sid": req.session_id,
-                        "tid": int(req.topic_id),
-                        "u": user_text,
-                        "a": assistant_text,
-                        "s": Status.fallback.value if hasattr(Status.fallback, "value") else str(Status.fallback),
-                    },
-                )
-            except Exception:
-                db.execute(
-                    text(
-                        """
-                        INSERT INTO talk_messages (session_id, user_text, assistant_text, status)
-                        VALUES (:sid, :u, :a, :s)
-                        """
-                    ),
-                    {
-                        "sid": req.session_id,
-                        "u": user_text,
-                        "a": assistant_text,
-                        "s": Status.fallback.value if hasattr(Status.fallback, "value") else str(Status.fallback),
-                    },
-                )
-            db.commit()
-        except Exception:
-            db.rollback()
-            pass
+        # 로그 저장(talk_messages)
+        db.execute(
+            text("""
+                INSERT INTO talk_messages (session_id, topic_id, user_text, assistant_text, status)
+                VALUES (:sid, :tid, :u, :a, :s)
+            """),
+            {
+                "sid": req.session_id,
+                "tid": int(req.topic_id),
+                "u": user_text,
+                "a": assistant_text,
+                "s": Status.fallback.value,
+            },
+        )
+        db.commit()
 
         return {
             "status": Status.fallback,
@@ -519,79 +452,52 @@ def talk_turn(req: TalkRequest, db: Session = Depends(get_db)):
         user_text=user_text,
     )
 
-    # 5) GPT 호출 (실패하면 fallback)
-    status = Status.ok
-    fallback_code = None
-    assistant_text = ""
+    # 5) LLM 호출 (공통 래퍼: timeout 8초, retry 2회)
+    fallback_text = FALLBACK_LINES[int(time.time()) % len(FALLBACK_LINES)]
+    result = call_llm(
+        prompt,
+        model=getattr(req, "model", None),
+        max_tokens=getattr(req, "max_output_tokens", None) or 220,
+        fallback_text="",  # 파싱 후 처리하므로 빈 문자열
+    )
+
     new_memory = session_memory
 
-    try:
-        resp = client.chat.completions.create(
-            model=getattr(req, "model", None) or "gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=getattr(req, "max_output_tokens", None) or 220,
-        )
-
-        raw = resp.choices[0].message.content or ""
-        assistant_text, parsed_memory = _parse_assistant_and_memory(raw)
-
+    if result.success:
+        assistant_text, parsed_memory = _parse_assistant_and_memory(result.content)
         if not assistant_text:
-            raise RuntimeError("empty output")
-
-        if parsed_memory:
-            new_memory = _trim(parsed_memory, MEMORY_LIMIT)
-
-        status = Status.ok
-
-    except Exception:
+            # 파싱 실패 시 fallback
+            status = Status.fallback
+            fallback_code = "LLM_PARSE_ERROR"
+            assistant_text = _trim(fallback_text, OUTPUT_LIMIT)
+        else:
+            status = Status.ok
+            fallback_code = None
+            if parsed_memory:
+                new_memory = _trim(parsed_memory, MEMORY_LIMIT)
+    else:
         status = Status.fallback
-        fallback_code = "LLM_FAILED"
-        assistant_text = _trim(
-            FALLBACK_LINES[int(time.time()) % len(FALLBACK_LINES)],
-            OUTPUT_LIMIT,
-        )
-        new_memory = session_memory
+        fallback_code = result.fallback_code
+        assistant_text = _trim(fallback_text, OUTPUT_LIMIT)
 
-    # 6) DB 저장 talk_messages (topic_id 포함)
-    try:
-        try:
-            db.execute(
-                text(
-                    """
-                    INSERT INTO talk_messages (session_id, topic_id, user_text, assistant_text, status)
-                    VALUES (:sid, :tid, :u, :a, :s)
-                    """
-                ),
-                {
-                    "sid": req.session_id,
-                    "tid": int(req.topic_id),
-                    "u": user_text,
-                    "a": assistant_text,
-                    "s": status.value if hasattr(status, "value") else str(status),
-                },
-            )
-        except Exception:
-            db.execute(
-                text(
-                    """
-                    INSERT INTO talk_messages (session_id, user_text, assistant_text, status)
-                    VALUES (:sid, :u, :a, :s)
-                    """
-                ),
-                {
-                    "sid": req.session_id,
-                    "u": user_text,
-                    "a": assistant_text,
-                    "s": status.value if hasattr(status, "value") else str(status),
-                },
-            )
-        db.commit()
-    except Exception:
-        db.rollback()
-        pass
+    # 6) DB 저장 talk_messages
+    db.execute(
+        text("""
+            INSERT INTO talk_messages (session_id, topic_id, user_text, assistant_text, status)
+            VALUES (:sid, :tid, :u, :a, :s)
+        """),
+        {
+            "sid": req.session_id,
+            "tid": int(req.topic_id),
+            "u": user_text,
+            "a": assistant_text,
+            "s": status.value,
+        },
+    )
+    db.commit()
 
-    # 7) 세션 메모/턴카운트 업데이트(가능하면)
-    _try_update_session_memory_and_count(db, req.session_id, new_memory)
+    # 7) 세션 메모/턴카운트 업데이트
+    _update_session_memory_and_count(db, req.session_id, new_memory)
 
     return {
         "status": status,

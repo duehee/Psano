@@ -68,29 +68,15 @@ def end_session_core(db: Session, sid: int, reason: str) -> Dict[str, Any]:
     try:
         ended_at = now_kst_naive()  # KST +9
 
-        # 1) end_reason 컬럼 유무에 따라 안전 처리 + ended_at IS NULL 조건
-        try:
-            res = db.execute(
-                text("""
-                    UPDATE sessions
-                    SET ended_at = :ended_at,
-                        end_reason = :end_reason
-                    WHERE id = :id
-                      AND ended_at IS NULL
-                """),
-                {"ended_at": ended_at, "end_reason": reason, "id": sid},
-            )
-        except Exception:
-            res = db.execute(
-                text("""
-                    UPDATE sessions
-                    SET ended_at = :ended_at
-                    WHERE id = :id
-                      AND ended_at IS NULL
-                """),
-                {"ended_at": ended_at, "id": sid},
-            )
-
+        # 세션 종료 처리 (ended_at IS NULL 조건으로 race condition 방지)
+        res = db.execute(
+            text("""
+                UPDATE sessions
+                SET ended_at = :ended_at, end_reason = :end_reason
+                WHERE id = :id AND ended_at IS NULL
+            """),
+            {"ended_at": ended_at, "end_reason": reason, "id": sid},
+        )
         db.commit()
 
         # 2) rowcount==0이면 이미 종료됐을 가능성 → 재조회해서 반환

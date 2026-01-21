@@ -1,13 +1,13 @@
+import time
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import text
-from openai import OpenAI
 
 from database import get_db
 from schemas.answer import AnswerRequest, AnswerResponse
+from services.llm_service import call_llm
 
 router = APIRouter()
-client = OpenAI()
 
 SESSION_QUESTION_LIMIT = 5
 MAX_QUESTIONS = 380
@@ -98,8 +98,6 @@ def _reaction_text_gpt(
     answered_total: int,
 ) -> str:
     """유저 답변에 GPT가 성장단계 스타일로 짧게 반응"""
-    import time
-
     is_last = session_question_index >= SESSION_QUESTION_LIMIT
 
     # 성장단계 로드
@@ -127,19 +125,23 @@ def _reaction_text_gpt(
 
 한 문장으로 반응해줘."""
 
-    try:
-        resp = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=50,
-        )
-        text = (resp.choices[0].message.content or "").strip()
-        return text[:60] if text else FALLBACK_REACTIONS[int(time.time()) % len(FALLBACK_REACTIONS)]
-    except Exception:
-        # fallback
-        if is_last:
-            return "좋아. 오늘은 여기까지 해보자."
-        return FALLBACK_REACTIONS[int(time.time()) % len(FALLBACK_REACTIONS)]
+    # fallback 텍스트 결정
+    if is_last:
+        fallback_text = "좋아. 오늘은 여기까지 해보자."
+    else:
+        fallback_text = FALLBACK_REACTIONS[int(time.time()) % len(FALLBACK_REACTIONS)]
+
+    # LLM 호출 (공통 래퍼: timeout 8초, retry 2회)
+    result = call_llm(
+        prompt,
+        max_tokens=50,
+        fallback_text=fallback_text,
+    )
+
+    if result.success:
+        return result.content[:60]
+    else:
+        return result.content
 
 @router.post("", response_model=AnswerResponse)
 def post_answer(req: AnswerRequest, db: Session = Depends(get_db)):
