@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
-from zoneinfo import ZoneInfo
-
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -14,34 +11,9 @@ from schemas.session import (
 )
 from routers._store import LOCK, GLOBAL_STATE, SESSIONS
 from database import get_db
+from utils import now_kst_naive, iso
 
 router = APIRouter()
-
-KST = ZoneInfo("Asia/Seoul")
-
-
-def now_kst_naive() -> datetime:
-    # DB DATETIME에 그대로 박을 "한국 시간" (tz 없는 naive datetime)
-    # KST는 DST 없어서 utc+9로도 OK
-    return datetime.utcnow() + timedelta(hours=9)
-
-
-def _iso(dt):
-    if dt is None:
-        return None
-    try:
-        return dt.isoformat(sep=" ", timespec="seconds")
-    except Exception:
-        return str(dt)
-
-
-def _epoch_to_kst_iso(ts):
-    if ts is None:
-        return None
-
-    dt = datetime.fromtimestamp(float(ts), tz=timezone.utc).astimezone(KST)
-    dt = dt.replace(tzinfo=None)  # KST naive로 표기
-    return _iso(dt)
 
 
 def _read_session_row(db: Session, sid: int):
@@ -123,8 +95,8 @@ def get_session(session_id: int, db: Session = Depends(get_db)):
             return {
                 "session_id": sid,
                 "visitor_name": sess.get("visitor_name"),
-                "started_at": _iso(sess.get("started_at")),
-                "ended_at": _iso(sess.get("ended_at")),
+                "started_at": iso(sess.get("started_at")),
+                "ended_at": iso(sess.get("ended_at")),
                 "end_reason": sess.get("end_reason"),
                 # talk 전용(없으면 None/0)
                 "topic_id": sess.get("topic_id"),
@@ -141,8 +113,8 @@ def get_session(session_id: int, db: Session = Depends(get_db)):
     return {
         "session_id": int(row["id"]),
         "visitor_name": row.get("visitor_name"),
-        "started_at": _iso(row.get("started_at")),
-        "ended_at": _iso(ended_at) if ended_at else None,
+        "started_at": iso(row.get("started_at")),
+        "ended_at": iso(ended_at) if ended_at else None,
         "end_reason": row.get("end_reason"),
         "topic_id": row.get("topic_id"),
         "talk_memory": row.get("talk_memory"),

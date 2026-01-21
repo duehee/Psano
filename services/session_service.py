@@ -1,27 +1,13 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from fastapi import HTTPException
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from routers._store import LOCK, SESSIONS
-
-
-def now_kst_naive() -> datetime:
-    # DB DATETIME에 그대로 박을 "한국 시간"(tz 없는 naive)
-    return datetime.utcnow() + timedelta(hours=9)
-
-
-def _iso(dt):
-    if dt is None:
-        return None
-    try:
-        return dt.isoformat(sep=" ", timespec="seconds")
-    except Exception:
-        return str(dt)
+from utils import now_kst_naive, iso
 
 
 def end_session_core(db: Session, sid: int, reason: str) -> Dict[str, Any]:
@@ -49,7 +35,7 @@ def end_session_core(db: Session, sid: int, reason: str) -> Dict[str, Any]:
 
     if row.get("ended_at") is not None:
         ended_at = row.get("ended_at")
-        ended_iso = _iso(ended_at) if ended_at else None
+        ended_iso = iso(ended_at) if ended_at else None
 
         with LOCK:
             sess = SESSIONS.get(sid)
@@ -90,7 +76,7 @@ def end_session_core(db: Session, sid: int, reason: str) -> Dict[str, Any]:
                 {"id": sid},
             ).mappings().first()
 
-            ended_iso = _iso(row2.get("ended_at")) if row2 else None
+            ended_iso = iso(row2.get("ended_at")) if row2 else None
             return {
                 "session_id": sid,
                 "ended": True,
@@ -117,5 +103,5 @@ def end_session_core(db: Session, sid: int, reason: str) -> Dict[str, Any]:
         "ended": True,
         "already_ended": False,
         "end_reason": reason,
-        "ended_at": _iso(ended_at),
+        "ended_at": iso(ended_at),
     }

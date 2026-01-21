@@ -1,5 +1,4 @@
 import time
-import json
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import text
@@ -14,6 +13,7 @@ from schemas.monologue import (
 # (선택) 정책 필터 재사용하고 싶으면 import
 from routers.talk_policy import moderate_text, generate_policy_response, Action
 from services.llm_service import call_llm
+from utils import trim, summary_to_text, load_growth_stage
 
 
 OUTPUT_LIMIT = 150
@@ -25,22 +25,6 @@ FALLBACK_LINES = [
     "말이 오기 전에 숨이 먼저 지나가.",
     "지금은 한 문장만 남겨둘게.",
 ]
-
-
-def _trim(s: str, n: int) -> str:
-    s = (s or "").strip()
-    return s[:n] if len(s) > n else s
-
-
-def _summary_to_text(v) -> str:
-    if v is None:
-        return ""
-    if isinstance(v, (dict, list)):
-        try:
-            return json.dumps(v, ensure_ascii=False)
-        except Exception:
-            return str(v)
-    return str(v)
 
 
 def _apply_policy_guard(db: Session, text_for_check: str, user_text: str = ""):
@@ -63,7 +47,7 @@ def _apply_policy_guard(db: Session, text_for_check: str, user_text: str = ""):
 
     return {
         "status": Status.fallback,
-        "assistant_text": _trim(msg, OUTPUT_LIMIT),
+        "assistant_text": trim(msg, OUTPUT_LIMIT),
         "fallback_code": f"POLICY_{rule.category.upper()}",
         "policy_category": rule.category,
     }
@@ -82,37 +66,6 @@ def _answered_total(db: Session) -> int:
         return 0
 
 
-def _load_growth_stage(db: Session, answered_total: int):
-    row = db.execute(
-        text("""
-            SELECT stage_id, stage_name_kr, stage_name_en,
-                   min_answers, max_answers, metaphor_density, certainty,
-                   sentence_length, empathy_level, notes
-            FROM psano_growth_stages
-            WHERE :n BETWEEN min_answers AND max_answers
-            ORDER BY stage_id ASC
-            LIMIT 1
-        """),
-        {"n": int(answered_total)},
-    ).mappings().first()
-
-    if row:
-        return row
-
-    row2 = db.execute(
-        text("""
-            SELECT stage_id, stage_name_kr, stage_name_en,
-                   min_answers, max_answers, metaphor_density, certainty,
-                   sentence_length, empathy_level, notes
-            FROM psano_growth_stages
-            ORDER BY stage_id DESC
-            LIMIT 1
-        """)
-    ).mappings().first()
-
-    return row2
-
-
 def _char_budget(sentence_length_label: str) -> int:
     lab = (sentence_length_label or "").strip()
     if lab == "매우 짧음":
@@ -126,7 +79,7 @@ def _char_budget(sentence_length_label: str) -> int:
 
 def build_idle_monologue_prompt(*, persona: str | None, values_summary, stage, answered_total: int) -> str:
     persona = (persona or "").strip()
-    summary_text = _summary_to_text(values_summary).strip()
+    summary_text = summary_to_text(values_summary).strip()
 
     # stage가 None일 경우 기본값 처리
     stage = stage or {}
@@ -185,7 +138,7 @@ def idle_monologue(req: MonologueRequest, db: Session = Depends(get_db)):
     else:
         answered_total = _answered_total(db)
 
-    stage = _load_growth_stage(db, answered_total) or {}
+    stage = load_growth_stage(db, answered_total) or {}
 
     st = db.execute(
         text("""
@@ -229,11 +182,11 @@ def idle_monologue(req: MonologueRequest, db: Session = Depends(get_db)):
 
     if result.success:
         status = Status.ok
-        monologue_text = _trim(result.content, OUTPUT_LIMIT)
+        monologue_text = trim(result.content, OUTPUT_LIMIT)
         fallback_code = None
     else:
         status = Status.fallback
-        monologue_text = _trim(result.content, OUTPUT_LIMIT)
+        monologue_text = trim(result.content, OUTPUT_LIMIT)
         fallback_code = result.fallback_code
 
     return {
@@ -298,7 +251,7 @@ def _get_recent_messages(db: Session, sid: int, limit: int = 6):
 
 def build_nudge_prompt(*, persona: str | None, values_summary, topic_ctx: str, recent_msgs: list, talk_memory: str | None):
     persona = (persona or "").strip()
-    summary_text = _summary_to_text(values_summary).strip()
+    summary_text = summary_to_text(values_summary).strip()
     mem = (talk_memory or "").strip()
 
     convo_lines = []
@@ -408,11 +361,11 @@ def talk_nudge(req: NudgeRequest, db: Session = Depends(get_db)):
 
         if result.success:
             status = Status.ok
-            nudge_text = _trim(result.content, OUTPUT_LIMIT)
+            nudge_text = trim(result.content, OUTPUT_LIMIT)
             fallback_code = None
         else:
             status = Status.fallback
-            nudge_text = _trim(result.content, OUTPUT_LIMIT)
+            nudge_text = trim(result.content, OUTPUT_LIMIT)
             fallback_code = result.fallback_code
 
     # 4) talk_messages 저장 (nudge 마킹)

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
 from typing import Dict, Any, List, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -9,15 +8,15 @@ from sqlalchemy import text
 
 from database import get_db
 from schemas.persona import PersonaGenerateRequest, PersonaGenerateResponse
+from utils import now_kst_naive, iso
 
 from routers.talk import client
 
 router = APIRouter()
 
-KST_OFFSET = 9
 TOTAL_QUESTIONS = 380
 
-# 기획 기준: “각 반대쌍 문항 수”
+# 기획 기준: "각 반대쌍 문항 수"
 PAIR_QUESTION_COUNT = 76
 
 # 네 psano_personality 컬럼(스크린샷 기준)
@@ -58,17 +57,6 @@ PAIRS: List[Dict[str, str]] = [
         "b_label": "보편",
     },
 ]
-
-def now_kst_naive() -> datetime:
-    return datetime.utcnow() + timedelta(hours=KST_OFFSET)
-
-def _iso(dt):
-    if dt is None:
-        return None
-    try:
-        return dt.isoformat(sep=" ", timespec="seconds")
-    except Exception:
-        return str(dt)
 
 def _strength_word(diff_ratio: float) -> str:
     # diff_ratio = (a-b)/PAIR_QUESTION_COUNT  ( -1.0 ~ +1.0 근처)
@@ -245,7 +233,7 @@ def _generate_persona(db: Session, *, force: bool, model: str | None, allow_unde
         return PersonaGenerateResponse(
             ok=True,
             phase=str(st.get("phase") or ""),
-            formed_at=_iso(existing_formed_at),
+            formed_at=iso(existing_formed_at),
             answered_total=answered_total,
             axis_scores=axis_scores,
             pair_insights=pair_insights,
@@ -322,7 +310,7 @@ def _generate_persona(db: Session, *, force: bool, model: str | None, allow_unde
     return PersonaGenerateResponse(
         ok=True,
         phase="talk",
-        formed_at=_iso(formed_at),
+        formed_at=iso(formed_at),
         answered_total=answered_total,
         axis_scores=axis_scores,
         pair_insights=pair_insights,

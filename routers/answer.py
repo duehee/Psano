@@ -6,6 +6,7 @@ from sqlalchemy import text
 from database import get_db
 from schemas.answer import AnswerRequest, AnswerResponse
 from services.llm_service import call_llm
+from utils import load_growth_stage
 
 router = APIRouter()
 
@@ -30,39 +31,6 @@ FALLBACK_REACTIONS = [
     "알겠어.",
     "오케이.",
 ]
-
-
-def _load_growth_stage(db: Session, answered_total: int):
-    """monolouge.py와 동일한 성장단계 로드"""
-    row = db.execute(
-        text("""
-            SELECT stage_id, stage_name_kr, stage_name_en,
-                   min_answers, max_answers, metaphor_density, certainty,
-                   sentence_length, empathy_level, notes
-            FROM psano_growth_stages
-            WHERE :n BETWEEN min_answers AND max_answers
-            ORDER BY stage_id ASC
-            LIMIT 1
-        """),
-        {"n": int(answered_total)},
-    ).mappings().first()
-
-    if row:
-        return row
-
-    # fallback: 가장 낮은 단계
-    row2 = db.execute(
-        text("""
-            SELECT stage_id, stage_name_kr, stage_name_en,
-                   min_answers, max_answers, metaphor_density, certainty,
-                   sentence_length, empathy_level, notes
-            FROM psano_growth_stages
-            ORDER BY stage_id ASC
-            LIMIT 1
-        """)
-    ).mappings().first()
-
-    return row2
 
 
 def _build_style_guide(stage) -> str:
@@ -101,7 +69,7 @@ def _reaction_text_gpt(
     is_last = session_question_index >= SESSION_QUESTION_LIMIT
 
     # 성장단계 로드
-    stage = _load_growth_stage(db, answered_total) or {}
+    stage = load_growth_stage(db, answered_total) or {}
     stage_name = stage.get("stage_name_kr") or "태동기"
     style_guide = _build_style_guide(stage)
     notes = (stage.get("notes") or "").strip()

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
 from io import BytesIO
 import os
 from typing import Optional, Dict
@@ -10,6 +9,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 from database import get_db
+from utils import iso, now_kst_naive
 from routers.persona import _generate_persona
 from schemas.admin import (
     AdminSessionsResponse, AdminProgressResponse,
@@ -38,19 +38,6 @@ ADMIN_TOKEN = os.getenv("ADMIN_TOKEN")
 # =========================
 # 공통 유틸리티
 # =========================
-
-def _iso(dt):
-    if dt is None:
-        return None
-    try:
-        return dt.isoformat(sep=" ", timespec="seconds")
-    except Exception:
-        return str(dt)
-
-
-def now_kst():
-    return datetime.utcnow() + timedelta(hours=9)
-
 
 def ensure_psano_state_row(db: Session):
     row = db.execute(text("SELECT id FROM psano_state WHERE id=1")).mappings().first()
@@ -447,8 +434,8 @@ def list_sessions(
         sessions = [{
             "id": int(r["id"]),
             "visitor_name": r["visitor_name"],
-            "started_at": _iso(r["started_at"]),
-            "ended_at": _iso(r["ended_at"]),
+            "started_at": iso(r["started_at"]),
+            "ended_at": iso(r["ended_at"]),
             "end_reason": r.get("end_reason"),
         } for r in rows]
 
@@ -466,8 +453,8 @@ def list_sessions(
         sessions = [{
             "id": int(r["id"]),
             "visitor_name": r["visitor_name"],
-            "started_at": _iso(r["started_at"]),
-            "ended_at": _iso(r["ended_at"]),
+            "started_at": iso(r["started_at"]),
+            "ended_at": iso(r["ended_at"]),
             "end_reason": None,
         } for r in rows]
 
@@ -581,7 +568,7 @@ def admin_set_phase(req: AdminPhaseSetRequest, db: Session = Depends(get_db)):
             try:
                 db.execute(
                     text("UPDATE psano_state SET phase = 'talk', formed_at = :formed_at WHERE id = 1"),
-                    {"formed_at": now_kst()}
+                    {"formed_at": now_kst_naive()}
                 )
             except Exception:
                 db.execute(text("UPDATE psano_state SET phase = 'talk' WHERE id = 1"))

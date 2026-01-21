@@ -1,10 +1,9 @@
 import time
-import json
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import text
-from datetime import datetime, timedelta
 from services.session_service import end_session_core
+from utils import iso, trim, summary_to_text
 
 from schemas.talk import (
     TalkRequest,
@@ -38,35 +37,6 @@ FALLBACK_LINES = [
     "답을 급히 만들고 싶진 않아. 한 번만 더 천천히 말해줄래?",
 ]
 
-
-def _iso(dt):
-    if dt is None:
-        return None
-    try:
-        return dt.isoformat(sep=" ", timespec="seconds")
-    except Exception:
-        return str(dt)
-
-def now_kst_naive() -> datetime:
-
-    return datetime.utcnow() + timedelta(hours=9)
-
-def _trim(s: str, n: int) -> str:
-    s = (s or "").strip()
-    return s[:n] if len(s) > n else s
-
-def _summary_to_text(v) -> str:
-    """values_summary가 JSON 컬럼이면 dict로 올 수도 있고,
-    TEXT 컬럼이면 str로 올 수도 있어서 둘 다 안전 처리.
-    """
-    if v is None:
-        return ""
-    if isinstance(v, (dict, list)):
-        try:
-            return json.dumps(v, ensure_ascii=False)
-        except Exception:
-            return str(v)
-    return str(v)
 
 def _load_topic(db: Session, topic_id: int):
     row = db.execute(
@@ -113,7 +83,7 @@ def _apply_policy_guard(db: Session, text_for_check: str, user_text: str):
 
     return {
         "status": Status.fallback,
-        "assistant_text": _trim(msg, OUTPUT_LIMIT),
+        "assistant_text": trim(msg, OUTPUT_LIMIT),
         "fallback_code": f"POLICY_{rule.category.upper()}",
         "policy_category": rule.category,
         "should_end": should_end,
@@ -122,7 +92,7 @@ def _apply_policy_guard(db: Session, text_for_check: str, user_text: str):
 
 def build_prompt(user_text: str, persona: str | None, summary) -> str:
     persona = persona or "You are Psano."
-    summary_text = _summary_to_text(summary)
+    summary_text = summary_to_text(summary)
     return (
         f"{persona}\n"
         "Output language: Korean.\n"
@@ -135,7 +105,7 @@ def build_prompt(user_text: str, persona: str | None, summary) -> str:
 
 def build_start_prompt(*, persona: str | None, summary, topic_ctx: str) -> str:
     persona = (persona or "").strip()
-    summary_text = _summary_to_text(summary).strip()
+    summary_text = summary_to_text(summary).strip()
 
     base = []
     if persona:
@@ -158,8 +128,8 @@ def _format_recent_turns(rows) -> str:
     """
     lines = []
     for r in rows:
-        u = _trim(r.get("user_text") or "", INPUT_LIMIT)
-        a = _trim(r.get("assistant_text") or "", OUTPUT_LIMIT)
+        u = trim(r.get("user_text") or "", INPUT_LIMIT)
+        a = trim(r.get("assistant_text") or "", OUTPUT_LIMIT)
         if u:
             lines.append(f"U: {u}")
         if a:
@@ -197,9 +167,9 @@ def build_turn_prompt(
     user_text: str,
 ) -> str:
     persona = persona or "You are Psano."
-    summary_text = _summary_to_text(summary)
+    summary_text = summary_to_text(summary)
 
-    mem = _trim(session_memory or "", MEMORY_LIMIT)
+    mem = trim(session_memory or "", MEMORY_LIMIT)
     recent = (recent_turns or "").strip()
 
     return (
@@ -244,7 +214,7 @@ def _parse_assistant_and_memory(raw: str) -> tuple[str, str]:
     if not assistant:
         assistant = raw
 
-    return _trim(assistant, OUTPUT_LIMIT), _trim(memory, MEMORY_LIMIT)
+    return trim(assistant, OUTPUT_LIMIT), trim(memory, MEMORY_LIMIT)
 
 
 def _update_session_memory_and_count(db: Session, session_id: int, memory: str):
@@ -256,7 +226,7 @@ def _update_session_memory_and_count(db: Session, session_id: int, memory: str):
                 turn_count = COALESCE(turn_count, 0) + 1
             WHERE id = :sid
         """),
-        {"sid": session_id, "mem": _trim(memory or "", MEMORY_LIMIT)},
+        {"sid": session_id, "mem": trim(memory or "", MEMORY_LIMIT)},
     )
     db.commit()
 
@@ -335,11 +305,11 @@ def talk_start(req: TalkStartRequest, db: Session = Depends(get_db)):
 
     if result.success:
         status = Status.ok
-        assistant_first_text = _trim(result.content, OUTPUT_LIMIT)
+        assistant_first_text = trim(result.content, OUTPUT_LIMIT)
         fallback_code = None
     else:
         status = Status.fallback
-        assistant_first_text = _trim(result.content, OUTPUT_LIMIT)
+        assistant_first_text = trim(result.content, OUTPUT_LIMIT)
         fallback_code = result.fallback_code
 
     # start는 저장 안 함
@@ -404,7 +374,7 @@ def talk_turn(req: TalkRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=409, detail="topic mismatch for this session")
 
     # 2.5) 입력 길이 제한
-    user_text = _trim(req.user_text, INPUT_LIMIT)
+    user_text = trim(req.user_text, INPUT_LIMIT)
 
     # 2.6) topic 컨텍스트
     topic_ctx = _topic_context(db, req.topic_id) + "\n"
@@ -439,7 +409,7 @@ def talk_turn(req: TalkRequest, db: Session = Depends(get_db)):
         }
 
     # 3) 세션 메모 + 최근 턴 로드(세션 범위)
-    session_memory = _trim(sess.get("talk_memory") or "", MEMORY_LIMIT)
+    session_memory = trim(sess.get("talk_memory") or "", MEMORY_LIMIT)
     recent_turns = _get_recent_turns(db, req.session_id, RECENT_TURNS)
 
     # 4) 프롬프트 구성(대화형)
@@ -469,16 +439,16 @@ def talk_turn(req: TalkRequest, db: Session = Depends(get_db)):
             # 파싱 실패 시 fallback
             status = Status.fallback
             fallback_code = "LLM_PARSE_ERROR"
-            assistant_text = _trim(fallback_text, OUTPUT_LIMIT)
+            assistant_text = trim(fallback_text, OUTPUT_LIMIT)
         else:
             status = Status.ok
             fallback_code = None
             if parsed_memory:
-                new_memory = _trim(parsed_memory, MEMORY_LIMIT)
+                new_memory = trim(parsed_memory, MEMORY_LIMIT)
     else:
         status = Status.fallback
         fallback_code = result.fallback_code
-        assistant_text = _trim(fallback_text, OUTPUT_LIMIT)
+        assistant_text = trim(fallback_text, OUTPUT_LIMIT)
 
     # 6) DB 저장 talk_messages
     db.execute(
@@ -533,7 +503,7 @@ def get_chat_topics(db: Session = Depends(get_db)):
                 "id": int(r["id"]),
                 "title": r["title"],
                 "description": r["description"],
-                "created_at": _iso(r.get("created_at")),
+                "created_at": iso(r.get("created_at")),
             }
         )
     return {"topics": topics}
