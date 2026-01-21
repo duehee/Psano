@@ -49,3 +49,30 @@ class AdminSetCurrentQuestionRequest(BaseModel):
 class AdminSetCurrentQuestionResponse(BaseModel):
     ok: bool
     current_question: int
+
+
+# =========================
+# Import 응답 스키마
+# =========================
+
+class ImportErrorItem(BaseModel):
+    row: int
+    message: str
+
+
+class AdminQuestionsImportResponse(BaseModel):
+    processed: int = 0
+    inserted: int = 0
+    updated: int = 0
+    unchanged: int = 0
+    failed: int = 0
+    errors: List[ImportErrorItem] = Field(default_factory=list)
+
+
+class AdminSettingsImportResponse(BaseModel):
+    processed: int = 0
+    inserted: int = 0
+    updated: int = 0
+    unchanged: int = 0
+    failed: int = 0
+    errors: List[ImportErrorItem] = Field(default_factory=list)

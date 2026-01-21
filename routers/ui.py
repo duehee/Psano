@@ -501,6 +501,23 @@ HTML = r"""
                   엑셀(.xlsx)을 올리면 <span class="mono">questions</span> 테이블이 upsert 됩니다.
                 </div>
               </div>
+              
+            <div class="sep"></div>
+
+              <div class="row" style="width:100%">
+                <div style="flex:1; min-width: 220px;">
+                  <div class="muted small">Settings import (xlsx)</div>
+                  <div class="sub">POST <span class="mono">/admin/settings/import</span></div>
+                </div>
+                <div class="row" style="width:100%">
+                  <input id="admSettingsXlsxFile" type="file" accept=".xlsx" />
+                  <button class="primary" onclick="adminImportSettings()">Upload</button>
+                </div>
+                <div class="hint">
+                  엑셀(.xlsx)을 올리면 <span class="mono">psano_growth_stages</span> 테이블이 upsert 됩니다.
+                  (시트명: <span class="mono">setting/settings/stage/stages</span> 우선, 없으면 첫 시트)
+                </div>
+              </div>
 
               <div class="sep"></div>
 
@@ -1336,6 +1353,31 @@ HTML = r"""
       await refreshAdminAll();
     } catch (e) {
       logErr("adminImportQuestions", e);
+    } finally {
+      stopSpin();
+    }
+  }
+  
+    async function adminImportSettings() {
+    const fileEl = document.getElementById("admSettingsXlsxFile");
+    if (!fileEl || !fileEl.files || !fileEl.files.length) {
+      return log("settings xlsx 파일이 없습니다. 파일 선택 후 Upload를 눌러 주세요.");
+    }
+
+    const file = fileEl.files[0];
+    if (!file.name.toLowerCase().endsWith(".xlsx")) {
+      return log("xlsx만 업로드 가능합니다. (.xlsx)");
+    }
+
+    startSpin();
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const data = await fetchMultipart("/admin/settings/import", fd, {});
+      log({ endpoint: "/admin/settings/import", data });
+      await refreshAdminAll();
+    } catch (e) {
+      logErr("adminImportSettings", e);
     } finally {
       stopSpin();
     }
