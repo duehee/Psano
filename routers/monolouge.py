@@ -158,7 +158,7 @@ def build_idle_monologue_prompt(*, persona: str | None, values_summary, stage, a
 [성장단계]
 - stage: {stage.get("stage_name_kr")} ({stage.get("stage_name_en")})
 - answered_total: {answered_total}
-- style hints: {stage.get("notes") or ""}
+- 말투 예시: {stage.get("notes") or ""}
 
 규칙:
 - 한국어
@@ -167,6 +167,7 @@ def build_idle_monologue_prompt(*, persona: str | None, values_summary, stage, a
 - 과장된 감정 표현 금지
 - 위험하거나 민감한 주제(자해/폭력/혐오/정치 선동 등) 언급 금지
 - 관람객에게 "대놓고 질문"하지 말 것(물음표는 많아도 1개)
+- 위 [말투 예시]의 톤과 어미를 참고해서 말해
 
 스타일 지시:
 - {metaphor_guide}

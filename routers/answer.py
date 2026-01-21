@@ -103,14 +103,16 @@ def _reaction_text_gpt(
     is_last = session_question_index >= SESSION_QUESTION_LIMIT
 
     # 성장단계 로드
-    stage = _load_growth_stage(db, answered_total)
-    stage_name = stage.get("stage_name_kr") if stage else "태동기"
+    stage = _load_growth_stage(db, answered_total) or {}
+    stage_name = stage.get("stage_name_kr") or "태동기"
     style_guide = _build_style_guide(stage)
+    notes = (stage.get("notes") or "").strip()
 
     prompt = f"""너는 전시 작품 '사노'야. 관람객이 질문에 답했어.
 
 [성장단계: {stage_name}]
 [스타일: {style_guide}]
+{f'[말투 예시: {notes}]' if notes else ''}
 
 질문: {question_text}
 선택: {choice}
@@ -121,6 +123,7 @@ def _reaction_text_gpt(
 - 판단/평가 금지
 - 가볍게 수긍하거나 호기심 표현
 - {'마지막이니까 "오늘은 여기까지" 느낌으로' if is_last else '다음으로 넘어가는 느낌'}
+- 위 [말투 예시]의 톤과 어미를 참고해서 말해
 
 한 문장으로 반응해줘."""
 

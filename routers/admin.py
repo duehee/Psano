@@ -17,6 +17,7 @@ from schemas.admin import (
     AdminPhaseSetRequest, AdminPhaseSetResponse,
     AdminSetCurrentQuestionRequest, AdminSetCurrentQuestionResponse,
     ImportErrorItem, AdminQuestionsImportResponse, AdminSettingsImportResponse,
+    AdminPersonalitySetRequest, AdminPersonalitySetResponse,
 )
 from schemas.persona import PersonaGenerateResponse, PersonaGenerateRequest
 
@@ -153,6 +154,19 @@ def _map_axis_key(axis_ko: str) -> Optional[str]:
     if k in AXIS_MAP.values():
         return k
     return None
+
+
+def ensure_psano_personality_row(db: Session):
+    row = db.execute(text("SELECT id FROM psano_personality WHERE id=1")).mappings().first()
+    if row:
+        return
+    db.execute(text("""
+        INSERT INTO psano_personality
+            (id, self_direction, conformity, stimulation, security, hedonism, tradition,
+             achievement, benevolence, power, universalism)
+        VALUES
+            (1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+    """))
 
 
 @router.post("/questions/import", response_model=AdminQuestionsImportResponse)
@@ -596,6 +610,57 @@ def admin_set_current_question(req: AdminSetCurrentQuestionRequest, db: Session 
         db.rollback()
         raise HTTPException(status_code=500, detail=f"db error: {e}")
 
+@router.post("/personality/set", response_model=AdminPersonalitySetResponse)
+def admin_personality_set(
+    req: AdminPersonalitySetRequest,
+    db: Session = Depends(get_db),
+    x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
+):
+    """
+    POST /admin/personality/set
+    psano_personality(id=1) 10개 축을 한 번에 덮어쓰기 (테스트용)
+    """
+    _check_admin_token(x_admin_token)
+
+    try:
+        ensure_psano_personality_row(db)
+
+        res = db.execute(
+            text("""
+                UPDATE psano_personality
+                SET
+                    self_direction = :self_direction,
+                    conformity     = :conformity,
+                    stimulation    = :stimulation,
+                    security       = :security,
+                    hedonism       = :hedonism,
+                    tradition      = :tradition,
+                    achievement    = :achievement,
+                    benevolence    = :benevolence,
+                    power          = :power,
+                    universalism   = :universalism
+                WHERE id = 1
+            """),
+            {
+                "self_direction": int(req.self_direction),
+                "conformity": int(req.conformity),
+                "stimulation": int(req.stimulation),
+                "security": int(req.security),
+                "hedonism": int(req.hedonism),
+                "tradition": int(req.tradition),
+                "achievement": int(req.achievement),
+                "benevolence": int(req.benevolence),
+                "power": int(req.power),
+                "universalism": int(req.universalism),
+            }
+        )
+
+        db.commit()
+        return AdminPersonalitySetResponse(ok=True, updated=(res.rowcount == 1))
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"db error: {e}")
 
 # =========================
 # Persona 생성 (관리자용)

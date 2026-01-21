@@ -5,6 +5,22 @@ from pydantic import BaseModel, Field
 
 Phase = Literal["teach", "talk"]
 
+class AdminPersonalitySetRequest(BaseModel):
+    self_direction: int
+    conformity: int
+    stimulation: int
+    security: int
+    hedonism: int
+    tradition: int
+    achievement: int
+    benevolence: int
+    power: int
+    universalism: int
+
+class AdminPersonalitySetResponse(BaseModel):
+    ok: bool
+    updated: bool
+
 class AdminSessionItem(BaseModel):
     id: int
     visitor_name: str
