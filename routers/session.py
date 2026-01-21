@@ -90,9 +90,9 @@ def start_session(req: SessionStartRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="visitor_name is empty")
 
     try:
-        started_at = now_kst_naive()  # ✅ +9
+        started_at = now_kst_naive()  # KST +9
 
-        # ✅ 여기서는 teach/talk 여부와 상관없이 "세션 기본 정보만" 생성
+        # teach/talk 여부와 상관없이 "세션 기본 정보만" 생성
         # talk 관련(topic_id/talk_memory/turn_count)은 절대 건드리지 않음
         result = db.execute(
             text("""

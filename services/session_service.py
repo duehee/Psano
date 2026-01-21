@@ -66,7 +66,7 @@ def end_session_core(db: Session, sid: int, reason: str) -> Dict[str, Any]:
         }
 
     try:
-        ended_at = now_kst_naive()  # ✅ +9
+        ended_at = now_kst_naive()  # KST +9
 
         # 1) end_reason 컬럼 유무에 따라 안전 처리 + ended_at IS NULL 조건
         try:

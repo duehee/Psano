@@ -1018,7 +1018,7 @@ HTML = r"""
       logErr("callNudge", e);
     } finally {
       isNudging = false;
-      // ✅ nudge 이후에도 다시 타이머를 걸고 싶으면 여기서 재시작
+      // nudge 이후에도 다시 타이머를 걸고 싶으면 여기서 재시작
       // startNudgeTimer();
     }
   }
@@ -1055,7 +1055,7 @@ HTML = r"""
       log({ endpoint: "/talk/start", data });
       await refreshState();
 
-      // ✅ 대화 시작 후 nudge 타이머 시작
+      // 대화 시작 후 nudge 타이머 시작
       startNudgeTimer();
     } catch (e) {
       logErr("talkStart", e);
@@ -1099,7 +1099,7 @@ HTML = r"""
     scrollChatToBottom();
 
     isSending = true;
-    clearNudgeTimer(); // ✅ 요청 중에는 nudge가 끼지 않도록
+    clearNudgeTimer(); // 요청 중에는 nudge가 끼지 않도록
 
     startSpin();
     try {
@@ -1121,7 +1121,7 @@ HTML = r"""
         log({ endpoint: "/talk/turn", data });
         await refreshState();
 
-        // ✅ 사노 응답 후 무응답 타이머 재시작
+        // 사노 응답 후 무응답 타이머 재시작
         startNudgeTimer();
         return;
       } catch (e1) {
@@ -1146,7 +1146,7 @@ HTML = r"""
       log({ endpoint: "/talk (fallback)", data: data2 });
       await refreshState();
 
-      // ✅ 사노 응답 후 무응답 타이머 재시작
+      // 사노 응답 후 무응답 타이머 재시작
       startNudgeTimer();
     } catch (e) {
       logErr("sendTalk", e);
@@ -1419,7 +1419,7 @@ HTML = r"""
     }
   });
 
-  // ✅ 입력 중이면 무응답 타이머 리셋(입력 중인데 nudge 튀는 거 방지)
+  // 입력 중이면 무응답 타이머 리셋(입력 중인데 nudge 튀는 거 방지)
   document.getElementById("talkInput")?.addEventListener("input", () => {
     startNudgeTimer();
   });
