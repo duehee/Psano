@@ -13,7 +13,7 @@ from schemas.monologue import (
 )
 
 # (선택) 정책 필터 재사용하고 싶으면 import
-from routers.talk_policy import moderate_text, Action
+from routers.talk_policy import moderate_text, generate_policy_response, Action
 
 
 OUTPUT_LIMIT = 150
@@ -44,27 +44,12 @@ def _summary_to_text(v) -> str:
     return str(v)
 
 
-def _policy_message(action: Action) -> str:
-    # nudge/idle은 아주 짧게
-    if action == Action.REDIRECT:
-        return "조금 다른 쪽에서 생각해볼까."
-    if action == Action.WARN_END:
-        return "오늘은 여기까지가 좋겠어."
-    if action == Action.BLOCK:
-        return "그 방향은 여기선 다루기 어려워."
-    if action == Action.PRIVACY:
-        return "개인정보는 말하지 말아줘."
-    if action == Action.CRISIS:
-        return "지금 위험하면 112/119에 연락해. 자살예방 109도 있어."
-    return FALLBACK_LINES[int(time.time()) % len(FALLBACK_LINES)]
-
-
-def _apply_policy_guard(text_for_check: str):
+def _apply_policy_guard(db: Session, text_for_check: str, user_text: str = ""):
     """
     CRISIS(자해/자살)와 PRIVACY(개인정보 regex)만 즉시 차단.
     나머지(성적/혐오/범죄/정치/종교)는 LLM이 프롬프트 가이드에 따라 자연스럽게 처리.
     """
-    hit = moderate_text(text_for_check)
+    hit = moderate_text(db, text_for_check)
     if not hit:
         return None
 
@@ -74,11 +59,13 @@ def _apply_policy_guard(text_for_check: str):
     if rule.action not in (Action.CRISIS, Action.PRIVACY):
         return None
 
-    msg = _policy_message(rule.action)
+    # GPT가 사노 스타일로 응답 생성
+    msg, _should_end = generate_policy_response(db, rule, user_text or text_for_check)
+
     return {
         "status": Status.fallback,
         "assistant_text": _trim(msg, OUTPUT_LIMIT),
-        "fallback_code": getattr(rule.fallback_id, "value", str(rule.fallback_id)),
+        "fallback_code": f"POLICY_{rule.category.upper()}",
         "policy_category": rule.category,
     }
 
@@ -138,9 +125,12 @@ def _char_budget(sentence_length_label: str) -> int:
     return 140
 
 
-def build_idle_monologue_prompt(*, persona: str | None, values_summary, stage: dict, answered_total: int) -> str:
+def build_idle_monologue_prompt(*, persona: str | None, values_summary, stage, answered_total: int) -> str:
     persona = (persona or "").strip()
     summary_text = _summary_to_text(values_summary).strip()
+
+    # stage가 None일 경우 기본값 처리
+    stage = stage or {}
 
     budget = _char_budget(stage.get("sentence_length"))
     metaphor = float(stage.get("metaphor_density") or 0.3)
@@ -195,7 +185,7 @@ def idle_monologue(req: MonologueRequest, db: Session = Depends(get_db)):
     else:
         answered_total = _answered_total(db)
 
-    stage = _load_growth_stage(db, answered_total)
+    stage = _load_growth_stage(db, answered_total) or {}
 
     st = db.execute(
         text("""
@@ -216,7 +206,7 @@ def idle_monologue(req: MonologueRequest, db: Session = Depends(get_db)):
     )
 
     # (선택) 정책 필터
-    policy = _apply_policy_guard(prompt)
+    policy = _apply_policy_guard(db, prompt)
     if policy:
         return {
             "status": policy["status"],
@@ -402,7 +392,7 @@ def talk_nudge(req: NudgeRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=409, detail="talk not started for this session. call POST /talk/start first.")
 
     topic_id = int(topic_id)
-    talk_memory = sess.get("talk_memory") if isinstance(sess, dict) else None
+    talk_memory = sess.get("talk_memory")
 
     # 3) topic + 최근 대화
     topic_ctx = _topic_context(db, topic_id)
@@ -417,7 +407,8 @@ def talk_nudge(req: NudgeRequest, db: Session = Depends(get_db)):
     )
 
     # (선택) 정책 필터: topic/대화 기반으로 한번만
-    policy = _apply_policy_guard(topic_ctx + "\n" + "\n".join([m.get("user_text","") for m in recent_msgs if m]) )
+    user_texts = "\n".join([m.get("user_text", "") for m in recent_msgs if m])
+    policy = _apply_policy_guard(db, topic_ctx + "\n" + user_texts, user_texts)
     if policy:
         nudge_text = policy["assistant_text"]
         fallback_code = policy["fallback_code"]

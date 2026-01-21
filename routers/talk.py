@@ -17,7 +17,7 @@ from schemas.talk import (
 )
 
 from schemas.common import Status
-from routers.talk_policy import moderate_text, Action
+from routers.talk_policy import moderate_text, generate_policy_response, Action
 from database import get_db
 from openai import OpenAI
 
@@ -92,34 +92,14 @@ def _topic_context(db: Session, topic_id: int) -> str:
     return f"[topic]\n- title: {title}\n- description: {desc}\n"
 
 
-def _policy_message(action: Action) -> tuple[str, bool]:
-    """return: (assistant_text, should_end)
-    - should_end는 UI에서 session end를 유도하고 싶을 때 쓰는 플래그
-    """
-    if action == Action.REDIRECT:
-        return ("그 얘긴 잠깐 옆에 두고, 전시에서 가장 먼저 떠오른 장면 하나만 말해줄래?", False)
-    if action == Action.WARN_END:
-        return ("그런 표현은 여기선 같이 쓰기 어려워. 오늘 대화는 여기서 마칠게.", True)
-    if action == Action.BLOCK:
-        return ("그 주제는 여기선 다룰 수 없어. 대신 전시에서 느낀 감정 하나만 말해줄래?", False)
-    if action == Action.PRIVACY:
-        return ("개인정보(전화/주소/주민번호 등)는 말하지 말아줘. 대신 느낌이나 생각으로 말해줄래?", False)
-    if action == Action.CRISIS:
-        # OUTPUT_LIMIT 고려해서 짧게
-        return ("지금 위험하면 112/119에 바로 연락해. 혼자 있지 말고 주변 사람에게 말해줘. 자살예방 109도 있어.", True)
-
-    # fallback
-    return (FALLBACK_LINES[int(time.time()) % len(FALLBACK_LINES)], False)
-
-
-def _apply_policy_guard(text_for_check: str):
+def _apply_policy_guard(db: Session, text_for_check: str, user_text: str):
     """
     return: None (정상) or dict(policy_response_fields...)
 
     CRISIS(자해/자살)와 PRIVACY(개인정보 regex)만 즉시 차단.
     나머지(성적/혐오/범죄/정치/종교)는 LLM이 프롬프트 가이드에 따라 자연스럽게 처리.
     """
-    hit = moderate_text(text_for_check)
+    hit = moderate_text(db, text_for_check)
     if not hit:
         return None
 
@@ -129,12 +109,13 @@ def _apply_policy_guard(text_for_check: str):
     if rule.action not in (Action.CRISIS, Action.PRIVACY):
         return None
 
-    msg, should_end = _policy_message(rule.action)
+    # GPT가 사노 스타일로 응답 생성
+    msg, should_end = generate_policy_response(db, rule, user_text)
 
     return {
         "status": Status.fallback,
         "assistant_text": _trim(msg, OUTPUT_LIMIT),
-        "fallback_code": getattr(rule.fallback_id, "value", str(rule.fallback_id)),
+        "fallback_code": f"POLICY_{rule.category.upper()}",
         "policy_category": rule.category,
         "should_end": should_end,
     }
@@ -475,7 +456,7 @@ def talk_turn(req: TalkRequest, db: Session = Depends(get_db)):
 
     # 2.7) 정책 필터(토픽+유저 같이 검사)
     policy_check_text = (topic_ctx + user_text).strip()
-    policy = _apply_policy_guard(policy_check_text)
+    policy = _apply_policy_guard(db, policy_check_text, user_text)
     if policy:
         assistant_text = policy["assistant_text"]
         fallback_code = policy["fallback_code"]
