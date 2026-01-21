@@ -299,6 +299,20 @@ def post_answer(req: AnswerRequest, db: Session = Depends(get_db)):
         answered_total,
     )
 
+    # DB에 사노 반응 저장 (실패해도 응답은 반환)
+    try:
+        db.execute(
+            text("""
+                UPDATE answers
+                SET assistant_reaction = :reaction
+                WHERE session_id = :sid AND question_id = :qid
+            """),
+            {"reaction": reaction_text, "sid": sid, "qid": qid}
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+
     return {
         "ok": True,
         "session_should_end": session_should_end,

@@ -842,14 +842,13 @@ HTML = r"""
       const data = await fetchJson("/answer", { method: "POST", body: JSON.stringify(body) });
       log({ endpoint: "/answer", data });
 
-      if (data.assistant_reaction_text) {
-        questionBox.textContent = data.assistant_reaction_text;
-      }
+      const reaction = data.assistant_reaction_text || "";
+      const idx = data.session_question_index ?? "-";
 
       if (data.session_should_end) {
-        setQuestion(null, `(형성 완료) ${data.session_question_index ?? 5}/5. 이제 End를 눌러 세션을 종료해 주세요.`);
+        setQuestion(null, `사노: ${reaction}\n\n(형성 완료) ${idx}/5. 이제 End를 눌러 세션을 종료해 주세요.`);
       } else {
-        setQuestion(null, `(저장 완료) ${data.session_question_index ?? "-"}/5. 다음 질문은 Get current question으로 가져와 주세요.`);
+        setQuestion(null, `사노: ${reaction}\n\n(저장 완료) ${idx}/5. 다음 질문은 Get current question으로 가져와 주세요.`);
       }
 
       await refreshState();
