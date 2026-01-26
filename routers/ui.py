@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
 
-router = APIRouter(tags=["ui"])
+router = APIRouter()
 
 HTML = r"""
 <!doctype html>
@@ -9,1535 +9,1258 @@ HTML = r"""
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Psano MVP Console</title>
+  <title>Psano Console</title>
   <style>
     :root {
-      --bg: #0b1220;
-      --panel: rgba(255,255,255,0.06);
-      --panel2: rgba(255,255,255,0.09);
-      --text: rgba(255,255,255,0.92);
-      --muted: rgba(255,255,255,0.60);
-      --line: rgba(255,255,255,0.10);
-      --good: #2dd4bf;
-      --warn: #fbbf24;
-      --bad:  #fb7185;
-      --btn: rgba(255,255,255,0.10);
-      --btn2: rgba(255,255,255,0.16);
-      --shadow: 0 14px 50px rgba(0,0,0,0.35);
-      --radius: 18px;
-      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-      --sans: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji";
+      --bg: #f8fafc;
+      --card: #ffffff;
+      --text: #1e293b;
+      --muted: #64748b;
+      --border: #e2e8f0;
+      --primary: #6366f1;
+      --primary-hover: #4f46e5;
+      --secondary: #f1f5f9;
+      --accent: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --shadow: 0 1px 3px rgba(0,0,0,0.1), 0 1px 2px rgba(0,0,0,0.06);
+      --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -2px rgba(0,0,0,0.05);
+      --radius: 12px;
+      --radius-sm: 8px;
+      --mono: 'SF Mono', Monaco, 'Cascadia Code', monospace;
     }
-    * { box-sizing: border-box; }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
     body {
-      margin: 0;
-      font-family: var(--sans);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
       color: var(--text);
-      background: radial-gradient(1200px 800px at 15% 10%, rgba(45,212,191,0.12), transparent 60%),
-                  radial-gradient(1200px 800px at 85% 20%, rgba(251,113,133,0.10), transparent 60%),
-                  var(--bg);
+      line-height: 1.5;
       min-height: 100vh;
-      padding: 28px;
     }
-    .wrap { max-width: 1050px; margin: 0 auto; }
-    header {
-      display:flex; align-items:flex-end; justify-content:space-between;
-      gap: 16px; margin-bottom: 18px;
+
+    /* Layout */
+    .app {
+      display: flex;
+      min-height: 100vh;
     }
-    h1 { margin: 0; font-size: 22px; letter-spacing: 0.2px; }
-    .sub { color: var(--muted); font-size: 13px; margin-top: 6px; }
-    .pill {
-      font-family: var(--mono);
-      font-size: 12px;
-      padding: 8px 10px;
-      border: 1px solid var(--line);
-      background: rgba(255,255,255,0.04);
-      border-radius: 999px;
-      color: var(--muted);
-      display:inline-flex; align-items:center; gap: 8px;
-    }
-    .dot { width: 8px; height: 8px; border-radius: 99px; background: var(--warn); }
-    .grid {
-      display:grid;
-      grid-template-columns: 1.1fr 0.9fr;
+
+    .sidebar {
+      width: 280px;
+      background: var(--card);
+      border-right: 1px solid var(--border);
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
       gap: 16px;
+      position: fixed;
+      height: 100vh;
+      overflow-y: auto;
     }
-    @media (max-width: 900px) {
-      .grid { grid-template-columns: 1fr; }
+
+    .main {
+      flex: 1;
+      margin-left: 280px;
+      padding: 24px;
+      max-width: 900px;
     }
-    .card {
-      background: var(--panel);
-      border: 1px solid var(--line);
+
+    /* Logo */
+    .logo {
+      font-size: 24px;
+      font-weight: 700;
+      background: linear-gradient(135deg, var(--primary), var(--accent));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 8px;
+    }
+
+    /* Status pill */
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      background: var(--secondary);
+      border-radius: 20px;
+      font-size: 12px;
+      font-family: var(--mono);
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--warning);
+    }
+
+    .status-dot.ok { background: var(--accent); }
+    .status-dot.error { background: var(--danger); }
+
+    /* Session card */
+    .session-card {
+      background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
       border-radius: var(--radius);
-      box-shadow: var(--shadow);
-      overflow: hidden;
+      padding: 16px;
+      color: white;
     }
-    .card .hd {
-      padding: 14px 16px;
-      display:flex; align-items:center; justify-content:space-between; gap: 10px;
-      border-bottom: 1px solid var(--line);
-      background: rgba(255,255,255,0.03);
+
+    .session-card .label {
+      font-size: 11px;
+      opacity: 0.8;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
     }
-    .title { font-size: 14px; color: rgba(255,255,255,0.82); }
-    .body { padding: 14px 16px; }
-    .row { display:flex; gap: 10px; flex-wrap: wrap; align-items:center; }
-    button {
-      cursor:pointer;
-      border: 1px solid var(--line);
-      background: var(--btn);
-      color: var(--text);
-      padding: 9px 12px;
-      border-radius: 12px;
-      font-size: 13px;
-      transition: transform .04s ease, background .12s ease;
-    }
-    button:hover { background: var(--btn2); }
-    button:active { transform: translateY(1px); }
-    button.primary { border-color: rgba(45,212,191,0.35); background: rgba(45,212,191,0.14); }
-    button.danger { border-color: rgba(251,113,133,0.35); background: rgba(251,113,133,0.12); }
-    button.ghost { background: transparent; }
-    .kbd {
+
+    .session-card .value {
+      font-size: 18px;
+      font-weight: 600;
       font-family: var(--mono);
-      font-size: 12px;
-      padding: 6px 8px;
-      border: 1px solid var(--line);
-      border-radius: 10px;
-      color: var(--muted);
-      background: rgba(0,0,0,0.18);
     }
-    input, textarea {
+
+    .session-card input {
       width: 100%;
       padding: 10px 12px;
-      border-radius: 14px;
-      border: 1px solid var(--line);
-      background: rgba(0,0,0,0.22);
-      color: var(--text);
-      outline: none;
-      font-size: 13px;
-    }
-    textarea { min-height: 100px; resize: vertical; }
-    input[type="file"] { width: auto; padding: 8px 10px; }
-    select {
-      padding: 10px 12px;
-      border-radius: 14px;
-      border: 1px solid var(--line);
-      background: rgba(0,0,0,0.22);
-      color: var(--text);
-      outline: none;
-      font-size: 13px;
-    }
-
-    .mono { font-family: var(--mono); }
-    .muted { color: var(--muted); }
-    .sep { height: 1px; background: var(--line); margin: 12px 0; }
-    .badge {
-      font-family: var(--mono);
-      font-size: 12px;
-      border: 1px solid var(--line);
-      padding: 6px 8px;
-      border-radius: 10px;
-      background: rgba(255,255,255,0.04);
-      color: var(--muted);
-      max-width: 100%;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-    .out {
-      border: 1px solid var(--line);
-      background: rgba(0,0,0,0.20);
-      border-radius: 14px;
-      padding: 12px;
-      white-space: pre-wrap;
-      line-height: 1.45;
-    }
-    .small { font-size: 12px; }
-    .status-ok .dot { background: var(--good); }
-    .status-warn .dot { background: var(--warn); }
-    .status-bad .dot { background: var(--bad); }
-    .two { display:grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-    .spin {
-      width: 14px; height: 14px; border-radius: 999px;
-      border: 2px solid rgba(255,255,255,0.25);
-      border-top-color: rgba(255,255,255,0.85);
-      animation: rot .8s linear infinite;
-      display:none;
-    }
-    @keyframes rot { to { transform: rotate(360deg); } }
-
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 12px;
-    }
-    th, td {
-      border-bottom: 1px solid rgba(255,255,255,0.10);
-      padding: 8px 6px;
-      vertical-align: top;
-    }
-    th { color: rgba(255,255,255,0.75); font-weight: 600; text-align: left; }
-    td { color: rgba(255,255,255,0.82); }
-    .right { text-align:right; }
-
-    .chk {
-      display:inline-flex;
-      gap:6px;
-      align-items:center;
-      font-size:12px;
-      color: rgba(255,255,255,0.75);
-      user-select:none;
-    }
-    .chk input { width:auto; }
-
-    .hint {
-      font-size: 12px;
-      color: rgba(255,255,255,0.62);
-      line-height: 1.4;
+      border: none;
+      border-radius: var(--radius-sm);
+      background: rgba(255,255,255,0.2);
+      color: white;
+      font-size: 14px;
       margin-top: 8px;
     }
 
-    /* ===== Talk chat UI ===== */
-    .chatWrap {
-      border: 1px solid var(--line);
-      background: rgba(0,0,0,0.18);
-      border-radius: 16px;
-      padding: 12px;
+    .session-card input::placeholder { color: rgba(255,255,255,0.6); }
+    .session-card input:focus { outline: none; background: rgba(255,255,255,0.3); }
+
+    .session-btns {
+      display: flex;
+      gap: 8px;
+      margin-top: 12px;
     }
 
-    .chatList {
-      height: 360px;
-      overflow: auto;
-      padding: 6px;
+    .session-btns .btn {
+      flex: 1;
+      padding: 10px;
+      font-size: 13px;
+    }
+
+    /* Nav */
+    .nav {
       display: flex;
       flex-direction: column;
-      gap: 10px;
+      gap: 4px;
     }
 
-    .bubbleRow {
+    .nav-item {
       display: flex;
-      align-items: flex-end;
-      gap: 8px;
-    }
-    .bubbleRow.user { justify-content: flex-end; }
-    .bubbleRow.assistant { justify-content: flex-start; }
-    .bubbleRow.system { justify-content: center; }
-
-    .bubble {
-      max-width: 78%;
+      align-items: center;
+      gap: 10px;
       padding: 10px 12px;
-      border-radius: 16px;
-      line-height: 1.45;
+      border-radius: var(--radius-sm);
+      font-size: 14px;
+      color: var(--muted);
+      cursor: pointer;
+      transition: all 0.15s;
+      border: none;
+      background: none;
+      width: 100%;
+      text-align: left;
+    }
+
+    .nav-item:hover { background: var(--secondary); color: var(--text); }
+    .nav-item.active { background: var(--primary); color: white; }
+    .nav-item .icon { font-size: 18px; }
+
+    /* Cards */
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      margin-bottom: 20px;
+    }
+
+    .card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .card-title {
+      font-size: 15px;
+      font-weight: 600;
+    }
+
+    .card-body { padding: 20px; }
+
+    /* Buttons */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 8px 16px;
+      border: none;
+      border-radius: var(--radius-sm);
       font-size: 13px;
-      border: 1px solid rgba(255,255,255,0.10);
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .btn-primary { background: var(--primary); color: white; }
+    .btn-primary:hover { background: var(--primary-hover); }
+    .btn-secondary { background: var(--secondary); color: var(--text); }
+    .btn-secondary:hover { background: #e2e8f0; }
+    .btn-danger { background: var(--danger); color: white; }
+    .btn-danger:hover { opacity: 0.9; }
+    .btn-ghost { background: transparent; color: var(--muted); }
+    .btn-ghost:hover { background: var(--secondary); color: var(--text); }
+    .btn-sm { padding: 6px 12px; font-size: 12px; }
+
+    /* Form elements */
+    input, textarea, select {
+      width: 100%;
+      padding: 10px 14px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      font-size: 14px;
+      background: var(--card);
+      color: var(--text);
+      transition: border-color 0.15s;
+    }
+
+    input:focus, textarea:focus, select:focus {
+      outline: none;
+      border-color: var(--primary);
+    }
+
+    textarea { min-height: 80px; resize: vertical; font-family: inherit; }
+
+    .form-group { margin-bottom: 16px; }
+    .form-label {
+      display: block;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+
+    .form-row {
+      display: flex;
+      gap: 12px;
+      align-items: flex-end;
+    }
+
+    .form-row > * { flex: 1; }
+
+    /* Badges */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 4px 10px;
+      background: var(--secondary);
+      border-radius: 6px;
+      font-size: 12px;
+      font-family: var(--mono);
+      color: var(--muted);
+    }
+
+    .badge-primary { background: #eef2ff; color: var(--primary); }
+    .badge-success { background: #ecfdf5; color: var(--accent); }
+
+    /* Output box */
+    .output {
+      background: #1e293b;
+      color: #e2e8f0;
+      border-radius: var(--radius-sm);
+      padding: 16px;
+      font-family: var(--mono);
+      font-size: 12px;
+      line-height: 1.6;
+      max-height: 300px;
+      overflow-y: auto;
       white-space: pre-wrap;
       word-break: break-word;
     }
 
-    .bubble.user {
-      background: rgba(45,212,191,0.14);
-      border-color: rgba(45,212,191,0.28);
-    }
-
-    .bubble.assistant {
-      background: rgba(255,255,255,0.06);
-    }
-
-    .bubble.system {
-      background: rgba(255,255,255,0.04);
-      color: rgba(255,255,255,0.70);
-      border-style: dashed;
-      font-size: 12px;
-      max-width: 92%;
+    /* Question box */
+    .question-box {
+      background: var(--secondary);
+      border-radius: var(--radius-sm);
+      padding: 20px;
       text-align: center;
     }
 
-    /* nudge 스타일(선택) */
-    .bubble.assistant.nudge {
-      border-style: dashed;
-      opacity: 0.92;
+    .question-text {
+      font-size: 16px;
+      font-weight: 500;
+      margin-bottom: 20px;
+      line-height: 1.6;
     }
 
-    .chatMeta {
-      font-family: var(--mono);
-      font-size: 11px;
-      color: rgba(255,255,255,0.50);
-      margin: 0 4px;
-    }
-
-    .chatInputBar {
-      margin-top: 12px;
+    .choices {
       display: flex;
-      gap: 10px;
-      align-items: flex-end;
+      gap: 12px;
     }
 
-    .chatInputBar textarea {
-      min-height: 56px;
+    .choice-btn {
+      flex: 1;
+      padding: 16px 20px;
+      background: var(--card);
+      border: 2px solid var(--border);
+      border-radius: var(--radius-sm);
+      font-size: 14px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .choice-btn:hover {
+      border-color: var(--primary);
+      background: #eef2ff;
+    }
+
+    .choice-btn .label {
+      display: block;
+      font-weight: 700;
+      color: var(--primary);
+      margin-bottom: 4px;
+    }
+
+    /* Chat */
+    .chat-container {
+      display: flex;
+      flex-direction: column;
+      height: 500px;
+    }
+
+    .chat-header {
+      display: flex;
+      gap: 12px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 16px;
+    }
+
+    .chat-messages {
+      flex: 1;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      padding: 4px;
+    }
+
+    .message {
+      max-width: 80%;
+      padding: 12px 16px;
+      border-radius: 16px;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .message.user {
+      align-self: flex-end;
+      background: var(--primary);
+      color: white;
+      border-bottom-right-radius: 4px;
+    }
+
+    .message.assistant {
+      align-self: flex-start;
+      background: var(--secondary);
+      border-bottom-left-radius: 4px;
+    }
+
+    .message.system {
+      align-self: center;
+      background: transparent;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .chat-input-bar {
+      display: flex;
+      gap: 12px;
+      padding-top: 16px;
+      border-top: 1px solid var(--border);
+      margin-top: 16px;
+    }
+
+    .chat-input-bar textarea {
+      flex: 1;
+      min-height: 44px;
+      max-height: 120px;
       resize: none;
     }
 
-    /* ===== Chat mode (focus) ===== */
-    body.mode-chat .grid { grid-template-columns: 1fr; }
-    body.mode-chat #debugCard { display: none; }
-    body.mode-chat #formationCard { display: none; }
-    body.mode-chat #adminCard { display: none; }
-    body.mode-chat .chatList { height: 520px; }
+    /* Table */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    th, td {
+      padding: 10px 12px;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+    }
+
+    th {
+      font-weight: 600;
+      color: var(--muted);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    /* Grid */
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+    .grid-5 { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
+
+    /* Section */
+    .section {
+      display: none;
+    }
+
+    .section.active {
+      display: block;
+    }
+
+    /* Divider */
+    .divider {
+      height: 1px;
+      background: var(--border);
+      margin: 20px 0;
+    }
+
+    /* Checkbox */
+    .checkbox-group {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+
+    .checkbox {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      cursor: pointer;
+    }
+
+    .checkbox input { width: auto; }
+
+    /* File input */
+    input[type="file"] {
+      padding: 8px;
+      font-size: 13px;
+    }
+
+    /* Spinner */
+    .spinner {
+      width: 16px;
+      height: 16px;
+      border: 2px solid var(--border);
+      border-top-color: var(--primary);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      display: none;
+    }
+
+    .spinner.show { display: inline-block; }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Stats */
+    .stats {
+      display: flex;
+      gap: 16px;
+    }
+
+    .stat {
+      flex: 1;
+      background: var(--secondary);
+      border-radius: var(--radius-sm);
+      padding: 16px;
+      text-align: center;
+    }
+
+    .stat-value {
+      font-size: 24px;
+      font-weight: 700;
+      color: var(--primary);
+      font-family: var(--mono);
+    }
+
+    .stat-label {
+      font-size: 11px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-top: 4px;
+    }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      .sidebar { display: none; }
+      .main { margin-left: 0; }
+    }
   </style>
 </head>
 
 <body>
-  <div class="wrap">
-    <header>
+  <div class="app">
+    <!-- Sidebar -->
+    <aside class="sidebar">
       <div>
-        <h1>Psano MVP Console</h1>
-        <div class="sub">버튼으로 바로 굴리는 로컬 UI / HTTP only</div>
-      </div>
-      <div id="healthPill" class="pill status-warn" title="서버 상태">
-        <span class="dot"></span>
-        <span class="mono">health: unknown</span>
-        <span id="spinner" class="spin"></span>
-      </div>
-    </header>
-
-    <div class="grid">
-      <!-- Left: main flow -->
-      <section class="card">
-        <div class="hd">
-          <div class="title">Session / Formation / Talk</div>
-          <div class="row">
-            <span id="sessionBadge" class="badge mono">session_id: -</span>
-            <button class="primary" onclick="startSession()">Start</button>
-            <button class="danger" onclick="endSession()">End</button>
-          </div>
+        <div class="logo">Psano</div>
+        <div class="status-pill">
+          <span class="status-dot" id="statusDot"></span>
+          <span id="statusText">connecting...</span>
+          <div class="spinner" id="spinner"></div>
         </div>
+      </div>
 
-        <div class="body">
-          <div class="row">
-            <button onclick="checkHealth()">Health</button>
-            <button onclick="refreshState()">State</button>
-            <span class="kbd">Tip: Start(이름) → Question → Answer 반복 → talk 되면 Talk</span>
-          </div>
+      <!-- Session -->
+      <div class="session-card">
+        <div class="label">Session</div>
+        <div class="value" id="sessionId">-</div>
+        <input type="text" id="visitorName" placeholder="방문자 이름 입력..." />
+        <div class="session-btns">
+          <button class="btn btn-secondary" onclick="startSession()">Start</button>
+          <button class="btn btn-danger" onclick="endSession()">End</button>
+        </div>
+      </div>
 
-          <div class="sep"></div>
+      <!-- Navigation -->
+      <nav class="nav">
+        <button class="nav-item active" onclick="showSection('formation')">
+          <span class="icon">📝</span> Formation
+        </button>
+        <button class="nav-item" onclick="showSection('talk')">
+          <span class="icon">💬</span> Talk
+        </button>
+        <button class="nav-item" onclick="showSection('admin')">
+          <span class="icon">⚙️</span> Admin
+        </button>
+        <button class="nav-item" onclick="showSection('debug')">
+          <span class="icon">🔍</span> Debug
+        </button>
+      </nav>
 
-          <div class="card" style="box-shadow:none; background: var(--panel2);">
-            <div class="hd">
-              <div class="title">Session Start</div>
-            </div>
-            <div class="body">
-              <div class="row" style="width:100%">
-                <div style="flex:1; min-width:240px">
-                  <input id="visitorName" placeholder="방문자 이름(닉네임 가능) 입력..." maxlength="100" />
-                </div>
-              </div>
-              <div class="sub" style="margin-top:10px">
-                Start는 <span class="mono">POST /session/start</span>로 <span class="mono">visitor_name</span>을 먼저 입력해 주세요.
-              </div>
-            </div>
-          </div>
+      <!-- Quick stats -->
+      <div style="margin-top: auto; padding-top: 16px; border-top: 1px solid var(--border);">
+        <div class="form-label">Current State</div>
+        <div style="display: flex; flex-direction: column; gap: 6px; font-size: 12px; font-family: var(--mono);">
+          <div>Phase: <strong id="statePhase">-</strong></div>
+          <div>Question: <strong id="stateQuestion">-</strong></div>
+        </div>
+      </div>
+    </aside>
 
-          <div class="sep"></div>
-
-          <div id="formationCard" class="card" style="box-shadow:none; background: var(--panel2);">
-            <div class="hd">
-              <div class="title">Formation (A/B)</div>
-              <div class="row">
-                <button onclick="getCurrentQuestion()">Get current question</button>
-                <span id="qBadge" class="badge mono">question_id: -</span>
-              </div>
-            </div>
-            <div class="body">
-              <div id="questionBox" class="out muted small">아직 질문 없음</div>
-              <div class="sep"></div>
-              <div class="two">
-                <button class="primary" onclick="sendAnswer('A')">Choose A</button>
-                <button onclick="sendAnswer('B')">Choose B</button>
-              </div>
-              <div class="sub" style="margin-top:10px">
-                <span class="mono">GET /question/current</span>로 받고, <span class="mono">POST /answer</span>로 저장합니다.
-              </div>
-            </div>
-          </div>
-
-          <div class="sep"></div>
-
-          <!-- Talk card (Chat UI) -->
-          <div id="talkCard" class="card" style="box-shadow:none; background: var(--panel2);">
-            <div class="hd">
-              <div class="title">Talk (채팅)</div>
-              <div class="row">
-                <button onclick="loadTopics()">Load topics</button>
-                <button class="ghost" onclick="toggleChatMode()">대화 모드</button>
-                <button class="ghost" onclick="clearChatUI()">Clear</button>
-                <button class="ghost" onclick="setExample()">Example</button>
-                <button class="danger" onclick="talkEnd()">Talk End</button>
-              </div>
-            </div>
-
-            <div class="body">
-              <div class="row" style="width:100%">
-                <select id="topicSelect" style="min-width: 220px;">
-                  <option value="1">1</option>
-                  <option value="2">2</option>
-                  <option value="3">3</option>
-                  <option value="4">4</option>
-                  <option value="5">5</option>
-                  <option value="6">6</option>
-                  <option value="7">7</option>
-                  <option value="8">8</option>
-                  <option value="9">9</option>
-                  <option value="10">10</option>
-                </select>
-                <span id="topicBadge" class="badge mono">topic_id: -</span>
-              </div>
-
-              <div class="hint" id="topicHint">
-                topics를 로드하면 title/description이 표시됩니다. Talk Start는 <span class="mono">POST /talk/start</span> 호출입니다.
-              </div>
-
-              <div class="sep"></div>
-
-              <div class="chatWrap">
-                <div id="chatList" class="chatList">
-                  <div class="bubbleRow system">
-                    <div class="bubble system">아직 대화가 없습니다. Talk Start를 눌러 시작해 주세요.</div>
-                  </div>
-                </div>
-
-                <div class="chatInputBar">
-                  <textarea id="talkInput" placeholder="메시지를 입력하세요... (Enter: 전송, Shift+Enter: 줄바꿈)"></textarea>
-                  <div style="display:flex; flex-direction:column; gap:10px; min-width: 130px;">
-                    <button class="primary" onclick="talkStart()">Talk Start</button>
-                    <button class="primary" onclick="sendTalk()">Send</button>
-                  </div>
-                </div>
-              </div>
-
-              <div id="talkOutput" class="out muted small" style="display:none">아직 응답 없음</div>
-
-              <div class="sub" style="margin-top:10px">
-                teach 단계면 Talk은 사용할 수 없는 것이 정상입니다(409).
-              </div>
+    <!-- Main content -->
+    <main class="main">
+      <!-- Formation Section -->
+      <section class="section active" id="sectionFormation">
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Formation (A/B 질문)</span>
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <span class="badge" id="qBadge">question: -</span>
+              <button class="btn btn-sm btn-secondary" onclick="getCurrentQuestion()">Load Question</button>
             </div>
           </div>
-
-          <div class="sep"></div>
-
-          <!-- Admin panel -->
-          <div id="adminCard" class="card" style="box-shadow:none; background: var(--panel2);">
-            <div class="hd">
-              <div class="title">Admin</div>
-              <div class="row">
-                <button onclick="fetchAdminProgress()">Progress</button>
-                <button onclick="fetchAdminSessions()">Sessions</button>
-                <button class="ghost" onclick="refreshAdminAll()">Refresh all</button>
+          <div class="card-body">
+            <div class="question-box" id="questionBox">
+              <div class="question-text" id="questionText">질문을 불러오세요</div>
+              <div class="choices">
+                <button class="choice-btn" onclick="sendAnswer('A')">
+                  <span class="label">A</span>
+                  <span id="choiceA">-</span>
+                </button>
+                <button class="choice-btn" onclick="sendAnswer('B')">
+                  <span class="label">B</span>
+                  <span id="choiceB">-</span>
+                </button>
               </div>
             </div>
-            <div class="body">
-              <div class="row">
-                <div class="badge mono">answered: <span id="admAnswered">-</span>/<span id="admMax">-</span></div>
-                <div class="badge mono">ratio: <span id="admRatio">-</span></div>
-                <div class="badge mono">phase: <span id="admPhase">-</span></div>
-                <div class="badge mono">current_q: <span id="admCurrentQ">-</span></div>
-              </div>
-
-              <div class="sep"></div>
-
-              <div class="row" style="width:100%">
-                <div style="flex:1; min-width: 220px;">
-                  <div class="muted small">Reset</div>
-                  <div class="sub">POST <span class="mono">/admin/reset</span></div>
-                </div>
-                <div class="row">
-                  <label class="chk"><input id="resetAnswers" type="checkbox" /> answers</label>
-                  <label class="chk"><input id="resetSessions" type="checkbox" /> sessions</label>
-                  <label class="chk"><input id="resetState" type="checkbox" /> state</label>
-                  <label class="chk"><input id="resetPsanoPersonality" type="checkbox" /> personality</label>
-                  <button class="danger" onclick="adminReset()">Reset</button>
-                </div>
-              </div>
-
-              <div class="sep"></div>
-
-              <div class="row" style="width:100%">
-                <div style="flex:1; min-width: 220px;">
-                  <div class="muted small">Phase set (test)</div>
-                  <div class="sub">POST <span class="mono">/admin/phase/set</span></div>
-                </div>
-                <div class="row" style="min-width: 240px;">
-                  <select id="admPhaseSelect">
-                    <option value="teach">teach</option>
-                    <option value="talk">talk</option>
-                  </select>
-                  <button onclick="adminSetPhase()">Apply</button>
-                </div>
-              </div>
-
-              <div class="sep"></div>
-
-              <div class="row" style="width:100%">
-                <div style="flex:1; min-width: 220px;">
-                  <div class="muted small">Set current_question (test)</div>
-                  <div class="sub">POST <span class="mono">/admin/state/set_current_question</span></div>
-                </div>
-                <div class="row">
-                  <input id="admSetQ" value="1" style="width:110px" />
-                  <button onclick="adminSetCurrentQuestion()">Apply</button>
-                </div>
-              </div>
-
-              <div class="sep"></div>
-
-              <div class="row" style="width:100%">
-                <div style="flex:1; min-width: 220px;">
-                  <div class="muted small">Questions import (xlsx)</div>
-                  <div class="sub">POST <span class="mono">/admin/questions/import</span></div>
-                </div>
-                <div class="row" style="width:100%">
-                  <input id="admXlsxFile" type="file" accept=".xlsx" />
-                  <button class="primary" onclick="adminImportQuestions()">Upload</button>
-                </div>
-                <div class="hint">
-                  엑셀(.xlsx)을 올리면 <span class="mono">questions</span> 테이블이 upsert 됩니다.
-                </div>
-              </div>
-              
-            <div class="sep"></div>
-
-              <div class="row" style="width:100%">
-                <div style="flex:1; min-width: 220px;">
-                  <div class="muted small">Settings import (xlsx)</div>
-                  <div class="sub">POST <span class="mono">/admin/settings/import</span></div>
-                </div>
-                <div class="row" style="width:100%">
-                  <input id="admSettingsXlsxFile" type="file" accept=".xlsx" />
-                  <button class="primary" onclick="adminImportSettings()">Upload</button>
-                </div>
-                <div class="hint">
-                  엑셀(.xlsx)을 올리면 <span class="mono">psano_growth_stages</span> 테이블이 upsert 됩니다.
-                  (시트명: <span class="mono">setting/settings/stage/stages</span> 우선, 없으면 첫 시트)
-                </div>
-              </div>
-
-              <div class="sep"></div>
-
-              <div class="row" style="width:100%">
-                <div style="flex:1; min-width: 220px;">
-                  <div class="muted small">Persona generate</div>
-                  <div class="sub">POST <span class="mono">/persona/generate</span></div>
-                </div>
-                <div class="row" style="width:100%">
-                  <input id="personaModel" class="mono" placeholder="model (optional)" style="max-width:240px" />
-                  <input id="personaMaxTokens" class="mono" placeholder="max_output_tokens (optional)" style="max-width:220px" />
-                  <label class="chk"><input id="personaForce" type="checkbox" /> force</label>
-                  <button class="primary" onclick="personaGenerate()">Generate</button>
-                </div>
-                <div class="hint">
-                  테스트용입니다. 성공하면 <span class="mono">/state</span>에서 phase 확인이 가능합니다.
-                </div>
-              </div>
-
-              <div class="sep"></div>
-
-              <div class="row" style="width:100%">
-                <div style="flex:1; min-width: 220px;">
-                  <div class="muted small">Personality set (test)</div>
-                  <div class="sub">GET/POST <span class="mono">/admin/personality</span></div>
-                </div>
-                <div class="row">
-                  <button onclick="fetchAdminPersonality()">Load</button>
-                  <button class="primary" onclick="adminSetPersonality()">Apply</button>
-                </div>
-              </div>
-
-              <div style="display:grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-top: 10px;">
-                <div>
-                  <label class="muted small">self_direction</label>
-                  <input id="pSelfDirection" type="number" value="0" style="width:100%" />
-                </div>
-                <div>
-                  <label class="muted small">conformity</label>
-                  <input id="pConformity" type="number" value="0" style="width:100%" />
-                </div>
-                <div>
-                  <label class="muted small">stimulation</label>
-                  <input id="pStimulation" type="number" value="0" style="width:100%" />
-                </div>
-                <div>
-                  <label class="muted small">security</label>
-                  <input id="pSecurity" type="number" value="0" style="width:100%" />
-                </div>
-                <div>
-                  <label class="muted small">hedonism</label>
-                  <input id="pHedonism" type="number" value="0" style="width:100%" />
-                </div>
-                <div>
-                  <label class="muted small">tradition</label>
-                  <input id="pTradition" type="number" value="0" style="width:100%" />
-                </div>
-                <div>
-                  <label class="muted small">achievement</label>
-                  <input id="pAchievement" type="number" value="0" style="width:100%" />
-                </div>
-                <div>
-                  <label class="muted small">benevolence</label>
-                  <input id="pBenevolence" type="number" value="0" style="width:100%" />
-                </div>
-                <div>
-                  <label class="muted small">power</label>
-                  <input id="pPower" type="number" value="0" style="width:100%" />
-                </div>
-                <div>
-                  <label class="muted small">universalism</label>
-                  <input id="pUniversalism" type="number" value="0" style="width:100%" />
-                </div>
-              </div>
-
-              <div class="hint">
-                psano_personality(id=1) 10개 축을 직접 설정합니다. Load로 현재 값을 불러오고, Apply로 저장합니다.
-              </div>
-
-              <div class="sep"></div>
-
-              <div class="row" style="width:100%">
-                <div style="flex:1; min-width: 220px;">
-                  <div class="muted small">최근 세션</div>
-                </div>
-                <div class="row">
-                  <span class="kbd">limit</span>
-                  <input id="admLimit" value="20" style="width:80px" />
-                  <span class="kbd">offset</span>
-                  <input id="admOffset" value="0" style="width:80px" />
-                </div>
-              </div>
-
-              <div class="sep"></div>
-
-              <div class="out mono small" id="admSessionsBox">(아직 불러오지 않음)</div>
+            <div id="reactionBox" style="margin-top: 16px; padding: 16px; background: #ecfdf5; border-radius: 8px; display: none;">
+              <strong>사노:</strong> <span id="reactionText"></span>
             </div>
           </div>
         </div>
       </section>
 
-      <!-- Right: debug panel -->
-      <aside id="debugCard" class="card">
-        <div class="hd">
-          <div class="title">Debug</div>
-          <div class="row">
-            <button onclick="clearLog()">Clear</button>
+      <!-- Talk Section -->
+      <section class="section" id="sectionTalk">
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Talk (대화)</span>
+            <div style="display: flex; gap: 8px;">
+              <button class="btn btn-sm btn-ghost" onclick="loadTopics()">Load Topics</button>
+              <button class="btn btn-sm btn-danger" onclick="talkEnd()">End Talk</button>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="chat-container">
+              <div class="chat-header">
+                <select id="topicSelect" style="flex: 1;">
+                  <option value="1">Topic 1</option>
+                </select>
+                <button class="btn btn-primary" onclick="talkStart()">Start Talk</button>
+              </div>
+              <div class="chat-messages" id="chatMessages">
+                <div class="message system">대화를 시작하려면 주제를 선택하고 Start Talk을 누르세요</div>
+              </div>
+              <div class="chat-input-bar">
+                <textarea id="talkInput" placeholder="메시지 입력... (Enter: 전송)" disabled></textarea>
+                <button class="btn btn-primary" onclick="sendTalk()" id="sendTalkBtn" disabled>Send</button>
+              </div>
+            </div>
           </div>
         </div>
-        <div class="body">
-          <div class="row">
-            <div class="badge mono">phase: <span id="phaseVal">-</span></div>
-            <div class="badge mono">current_q: <span id="currentQVal">-</span></div>
-            <div class="badge mono">formed_at: <span id="formedAtVal">-</span></div>
+      </section>
+
+      <!-- Admin Section -->
+      <section class="section" id="sectionAdmin">
+        <!-- Progress -->
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Progress</span>
+            <button class="btn btn-sm btn-secondary" onclick="fetchAdminProgress()">Refresh</button>
           </div>
-          <div class="sep"></div>
-          <div class="out mono small" id="log"></div>
-          <div class="sub" style="margin-top:12px">
-            현재 UI는 다음 엔드포인트에 맞춰 동작합니다:
-            <span class="mono">/session/start</span>,
-            <span class="mono">/question/current</span>,
-            <span class="mono">/answer</span>,
-            <span class="mono">/state</span>,
-            <span class="mono">/talk/topics</span>,
-            <span class="mono">/talk/start</span>,
-            <span class="mono">/talk/turn</span>,
-            <span class="mono">/talk/end</span>,
-            <span class="mono">/monologue/nudge</span>,
-            <span class="mono">/persona/generate</span>,
-            <span class="mono">/admin/progress</span>,
-            <span class="mono">/admin/sessions</span>,
-            <span class="mono">/admin/reset</span>,
-            <span class="mono">/admin/phase/set</span>,
-            <span class="mono">/admin/state/set_current_question</span>,
-            <span class="mono">/admin/questions/import</span>
+          <div class="card-body">
+            <div class="stats">
+              <div class="stat">
+                <div class="stat-value" id="admAnswered">-</div>
+                <div class="stat-label">Answered</div>
+              </div>
+              <div class="stat">
+                <div class="stat-value" id="admMax">380</div>
+                <div class="stat-label">Total</div>
+              </div>
+              <div class="stat">
+                <div class="stat-value" id="admRatio">-</div>
+                <div class="stat-label">Progress</div>
+              </div>
+              <div class="stat">
+                <div class="stat-value" id="admPhase">-</div>
+                <div class="stat-label">Phase</div>
+              </div>
+            </div>
           </div>
         </div>
-      </aside>
-    </div>
+
+        <!-- Reset -->
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Reset</span>
+          </div>
+          <div class="card-body">
+            <div class="checkbox-group" style="margin-bottom: 16px;">
+              <label class="checkbox"><input type="checkbox" id="resetAnswers" /> answers</label>
+              <label class="checkbox"><input type="checkbox" id="resetSessions" /> sessions</label>
+              <label class="checkbox"><input type="checkbox" id="resetState" /> state</label>
+              <label class="checkbox"><input type="checkbox" id="resetPersonality" /> personality</label>
+            </div>
+            <button class="btn btn-danger" onclick="adminReset()">Reset Selected</button>
+          </div>
+        </div>
+
+        <!-- Phase & Question -->
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">State Control</span>
+          </div>
+          <div class="card-body">
+            <div class="grid-2">
+              <div class="form-group">
+                <label class="form-label">Phase</label>
+                <div class="form-row">
+                  <select id="admPhaseSelect">
+                    <option value="teach">teach</option>
+                    <option value="talk">talk</option>
+                  </select>
+                  <button class="btn btn-secondary" onclick="adminSetPhase()">Apply</button>
+                </div>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Current Question</label>
+                <div class="form-row">
+                  <input type="number" id="admSetQ" value="1" />
+                  <button class="btn btn-secondary" onclick="adminSetCurrentQuestion()">Apply</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Import -->
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Import</span>
+          </div>
+          <div class="card-body">
+            <div class="grid-2">
+              <div class="form-group">
+                <label class="form-label">Questions (xlsx)</label>
+                <input type="file" id="admXlsxFile" accept=".xlsx" />
+                <button class="btn btn-primary btn-sm" style="margin-top: 8px;" onclick="adminImportQuestions()">Upload</button>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Settings (xlsx)</label>
+                <input type="file" id="admSettingsXlsxFile" accept=".xlsx" />
+                <button class="btn btn-primary btn-sm" style="margin-top: 8px;" onclick="adminImportSettings()">Upload</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Persona -->
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Persona Generate</span>
+          </div>
+          <div class="card-body">
+            <div class="form-row">
+              <div class="form-group" style="flex: 2;">
+                <label class="form-label">Model (optional)</label>
+                <input type="text" id="personaModel" placeholder="gpt-4o-mini" />
+              </div>
+              <div class="form-group" style="flex: 1;">
+                <label class="form-label">Max Tokens</label>
+                <input type="number" id="personaMaxTokens" placeholder="1200" />
+              </div>
+              <div class="form-group" style="flex: 0;">
+                <label class="form-label">&nbsp;</label>
+                <label class="checkbox"><input type="checkbox" id="personaForce" /> force</label>
+              </div>
+              <div class="form-group" style="flex: 0;">
+                <label class="form-label">&nbsp;</label>
+                <button class="btn btn-primary" onclick="personaGenerate()">Generate</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Personality -->
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Personality Values</span>
+            <div style="display: flex; gap: 8px;">
+              <button class="btn btn-sm btn-secondary" onclick="fetchAdminPersonality()">Load</button>
+              <button class="btn btn-sm btn-primary" onclick="adminSetPersonality()">Apply</button>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="grid-5">
+              <div class="form-group">
+                <label class="form-label">self_direction</label>
+                <input type="number" id="pSelfDirection" value="0" />
+              </div>
+              <div class="form-group">
+                <label class="form-label">conformity</label>
+                <input type="number" id="pConformity" value="0" />
+              </div>
+              <div class="form-group">
+                <label class="form-label">stimulation</label>
+                <input type="number" id="pStimulation" value="0" />
+              </div>
+              <div class="form-group">
+                <label class="form-label">security</label>
+                <input type="number" id="pSecurity" value="0" />
+              </div>
+              <div class="form-group">
+                <label class="form-label">hedonism</label>
+                <input type="number" id="pHedonism" value="0" />
+              </div>
+              <div class="form-group">
+                <label class="form-label">tradition</label>
+                <input type="number" id="pTradition" value="0" />
+              </div>
+              <div class="form-group">
+                <label class="form-label">achievement</label>
+                <input type="number" id="pAchievement" value="0" />
+              </div>
+              <div class="form-group">
+                <label class="form-label">benevolence</label>
+                <input type="number" id="pBenevolence" value="0" />
+              </div>
+              <div class="form-group">
+                <label class="form-label">power</label>
+                <input type="number" id="pPower" value="0" />
+              </div>
+              <div class="form-group">
+                <label class="form-label">universalism</label>
+                <input type="number" id="pUniversalism" value="0" />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Sessions -->
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Recent Sessions</span>
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <input type="number" id="admLimit" value="20" style="width: 60px;" />
+              <input type="number" id="admOffset" value="0" style="width: 60px;" />
+              <button class="btn btn-sm btn-secondary" onclick="fetchAdminSessions()">Load</button>
+            </div>
+          </div>
+          <div class="card-body">
+            <div id="admSessionsBox" style="overflow-x: auto;">
+              <div style="color: var(--muted); font-size: 13px;">Click Load to fetch sessions</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Debug Section -->
+      <section class="section" id="sectionDebug">
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Debug Log</span>
+            <div style="display: flex; gap: 8px;">
+              <button class="btn btn-sm btn-secondary" onclick="checkHealth()">Health</button>
+              <button class="btn btn-sm btn-secondary" onclick="refreshState()">State</button>
+              <button class="btn btn-sm btn-ghost" onclick="clearLog()">Clear</button>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="output" id="log">Ready...</div>
+          </div>
+        </div>
+      </section>
+    </main>
   </div>
 
 <script>
+  // State
   let sessionId = null;
   let lastQuestionId = null;
-
-  // talk topic state
   let topicsCache = [];
   let activeTopicId = null;
 
-  // nudge 타이머
-  let nudgeTimer = null;
-  const NUDGE_DELAY_MS = 10000;  // 10초
+  // Elements
+  const statusDot = document.getElementById('statusDot');
+  const statusText = document.getElementById('statusText');
+  const spinner = document.getElementById('spinner');
+  const logEl = document.getElementById('log');
 
-  // nudge / send 중복 방지
-  let isSending = false;
-  let isNudging = false;
-
-  const spinner = document.getElementById("spinner");
-  const pill = document.getElementById("healthPill");
-  const sessionBadge = document.getElementById("sessionBadge");
-  const qBadge = document.getElementById("qBadge");
-  const questionBox = document.getElementById("questionBox");
-  const talkOutput = document.getElementById("talkOutput");
-  const logEl = document.getElementById("log");
-
-  // talk topic UI
-  const topicSelect = document.getElementById("topicSelect");
-  const topicHint = document.getElementById("topicHint");
-  const topicBadge = document.getElementById("topicBadge");
-
-  // chat UI
-  const chatList = document.getElementById("chatList");
-
-  // admin el
-  const admAnswered = document.getElementById("admAnswered");
-  const admMax = document.getElementById("admMax");
-  const admRatio = document.getElementById("admRatio");
-  const admPhase = document.getElementById("admPhase");
-  const admCurrentQ = document.getElementById("admCurrentQ");
-  const admSessionsBox = document.getElementById("admSessionsBox");
-
-  function setPill(state, text) {
-    pill.classList.remove("status-ok", "status-warn", "status-bad");
-    pill.classList.add(state);
-    pill.querySelector("span.mono").textContent = text;
-  }
-
+  // Helpers
   function log(obj) {
     const t = new Date().toLocaleTimeString();
-    const s = (typeof obj === "string") ? obj : JSON.stringify(obj, null, 2);
+    const s = typeof obj === 'string' ? obj : JSON.stringify(obj, null, 2);
     logEl.textContent = `[${t}] ${s}\n\n` + logEl.textContent;
   }
 
-  function logErr(where, e) {
-    log({ where, error: e?.message || String(e), data: e?._data || null });
+  function clearLog() { logEl.textContent = ''; }
+
+  function setStatus(state, text) {
+    statusDot.className = 'status-dot ' + state;
+    statusText.textContent = text;
   }
 
-  function clearLog() { logEl.textContent = ""; }
-  function startSpin() { spinner.style.display = "inline-block"; }
-  function stopSpin() { spinner.style.display = "none"; }
+  function showSpinner(show) { spinner.classList.toggle('show', show); }
 
   async function fetchJson(url, options = {}) {
     const res = await fetch(url, {
-      headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+      headers: { 'Content-Type': 'application/json', ...options.headers },
       ...options
     });
-    const text = await res.text();
-    let data = null;
-    try { data = text ? JSON.parse(text) : null; }
-    catch { data = { _raw: text }; }
-
-    if (!res.ok) {
-      const detail = data?.detail || res.statusText || "request failed";
-      const err = new Error(`${res.status} ${detail}`);
-      err._data = data;
-      throw err;
-    }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || res.statusText);
     return data;
   }
 
-  async function fetchMultipart(url, formData, headers = {}) {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { ...(headers || {}) },
-      body: formData,
-    });
-
-    const text = await res.text();
-    let data = null;
-    try { data = text ? JSON.parse(text) : null; }
-    catch { data = { _raw: text }; }
-
-    if (!res.ok) {
-      const detail = data?.detail || res.statusText || "request failed";
-      const err = new Error(`${res.status} ${detail}`);
-      err._data = data;
-      throw err;
-    }
+  async function fetchMultipart(url, formData) {
+    const res = await fetch(url, { method: 'POST', body: formData });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || res.statusText);
     return data;
   }
 
+  // Navigation
+  function showSection(name) {
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+    document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+    document.querySelector(`[onclick="showSection('${name}')"]`).classList.add('active');
+    document.getElementById('section' + name.charAt(0).toUpperCase() + name.slice(1)).classList.add('active');
+  }
+
+  // Health
   async function checkHealth() {
-    startSpin();
+    showSpinner(true);
     try {
-      const data = await fetchJson("/health");
-      setPill("status-ok", "health: ok");
-      log({ endpoint: "/health", data });
+      const data = await fetchJson('/health');
+      setStatus('ok', 'connected');
+      log({ endpoint: '/health', data });
     } catch (e) {
-      setPill("status-bad", "health: error");
-      logErr("checkHealth", e);
-    } finally {
-      stopSpin();
+      setStatus('error', 'error');
+      log({ error: e.message });
+    }
+    showSpinner(false);
+  }
+
+  // State
+  async function refreshState() {
+    try {
+      const data = await fetchJson('/state');
+      document.getElementById('statePhase').textContent = data.phase || '-';
+      document.getElementById('stateQuestion').textContent = data.current_question || '-';
+      log({ endpoint: '/state', data });
+    } catch (e) {
+      log({ error: e.message });
     }
   }
 
-  function setExample() {
-    const el = document.getElementById("talkInput");
-    if (el) {
-      el.value = "사노야, 너는 지금 무엇이 되었어?";
-      el.focus();
-    }
-    startNudgeTimer();
-  }
-
-  function setSession(id) {
-    sessionId = id;
-    sessionBadge.textContent = `session_id: ${id || "-"}`;
-  }
-
-  function setQuestion(id, text, sessionQuestionIndex = null) {
-    lastQuestionId = id;
-
-    if (id == null) {
-      qBadge.textContent = "question_id: -";
-    } else if (sessionQuestionIndex != null) {
-      qBadge.textContent = `question_id: ${id} (${sessionQuestionIndex}/5)`;
-    } else {
-      qBadge.textContent = `question_id: ${id ?? "-"}`;
-    }
-
-    questionBox.textContent = text || "아직 질문 없음";
-  }
-
-  function updateStatePanel(st) {
-    if (!st) return;
-    document.getElementById("phaseVal").textContent = st.phase ?? "-";
-    document.getElementById("currentQVal").textContent = st.current_question ?? "-";
-    document.getElementById("formedAtVal").textContent = st.formed_at ?? "-";
-  }
-
+  // Session
   async function startSession() {
-    const name = document.getElementById("visitorName").value.trim();
-    if (!name) return log("visitor_name이 비어 있습니다. 이름을 입력해 주세요.");
+    const name = document.getElementById('visitorName').value.trim();
+    if (!name) return log('visitor_name is empty');
 
-    startSpin();
+    showSpinner(true);
     try {
-      const body = { visitor_name: name };
-      const data = await fetchJson("/session/start", { method: "POST", body: JSON.stringify(body) });
-      setSession(data.session_id);
-      log({ endpoint: "/session/start", data });
+      const data = await fetchJson('/session/start', {
+        method: 'POST',
+        body: JSON.stringify({ visitor_name: name })
+      });
+      sessionId = data.session_id;
+      document.getElementById('sessionId').textContent = sessionId;
+      log({ endpoint: '/session/start', data });
       await refreshState();
-
-      // 세션 새로 시작하면 토픽/채팅도 초기화
-      activeTopicId = null;
-      topicBadge.textContent = "topic_id: -";
-      clearChatUI();
-      clearNudgeTimer();
-
-      // 입력 비활성(대화 시작 전)
-      const inputEl = document.getElementById("talkInput");
-      if (inputEl) inputEl.disabled = true;
-
     } catch (e) {
-      logErr("startSession", e);
-    } finally {
-      stopSpin();
+      log({ error: e.message });
     }
+    showSpinner(false);
   }
 
   async function endSession() {
-    if (!sessionId) return log("세션이 없습니다. 먼저 Start를 눌러 주세요.");
-    startSpin();
+    if (!sessionId) return log('No session');
+    showSpinner(true);
     try {
-      const body = { session_id: sessionId, reason: "completed" };
-      const data = await fetchJson("/session/end", { method: "POST", body: JSON.stringify(body) });
-      log({ endpoint: "/session/end", data });
-
-      setSession(null);
-      setQuestion(null, "아직 질문 없음");
-
+      const data = await fetchJson('/session/end', {
+        method: 'POST',
+        body: JSON.stringify({ session_id: sessionId, reason: 'completed' })
+      });
+      sessionId = null;
       activeTopicId = null;
-      topicBadge.textContent = "topic_id: -";
-      clearChatUI();
-      clearNudgeTimer();
-
-      const inputEl = document.getElementById("talkInput");
-      if (inputEl) inputEl.disabled = true;
-
-      await refreshState();
-      await refreshAdminAll();
+      document.getElementById('sessionId').textContent = '-';
+      document.getElementById('talkInput').disabled = true;
+      document.getElementById('sendTalkBtn').disabled = true;
+      log({ endpoint: '/session/end', data });
     } catch (e) {
-      logErr("endSession", e);
-    } finally {
-      stopSpin();
+      log({ error: e.message });
     }
+    showSpinner(false);
   }
 
+  // Question
   async function getCurrentQuestion() {
-    if (!sessionId) return log("세션이 없습니다. 먼저 Start를 눌러 주세요.");
-    startSpin();
+    if (!sessionId) return log('No session');
+    showSpinner(true);
     try {
-      const data = await fetchJson(`/question/current?session_id=${encodeURIComponent(sessionId)}`);
-      const idx = data.session_question_index ?? null;
-
-      let text =
-        `[${idx ?? "-"} / 5]\n` +
-        `${data.question_text}\n\n` +
-        `A) ${data.choice_a}\n` +
-        `B) ${data.choice_b}\n\n` +
-        `axis_key: ${data.axis_key}`;
-
-      if (data.value_a_key || data.value_b_key) {
-        text += `\nvalue_a_key: ${data.value_a_key ?? ""}\nvalue_b_key: ${data.value_b_key ?? ""}`;
-      }
-
-      setQuestion(data.id, text, idx);
-      log({ endpoint: "/question/current", data });
+      const data = await fetchJson(`/question/current?session_id=${sessionId}`);
+      lastQuestionId = data.id;
+      document.getElementById('qBadge').textContent = `question: ${data.id} (${data.session_question_index || '?'}/5)`;
+      document.getElementById('questionText').textContent = data.question_text;
+      document.getElementById('choiceA').textContent = data.choice_a;
+      document.getElementById('choiceB').textContent = data.choice_b;
+      document.getElementById('reactionBox').style.display = 'none';
+      log({ endpoint: '/question/current', data });
     } catch (e) {
-      logErr("getCurrentQuestion", e);
-    } finally {
-      stopSpin();
+      log({ error: e.message });
     }
+    showSpinner(false);
   }
 
   async function sendAnswer(choice) {
-    if (!sessionId) return log("세션이 없습니다. 먼저 Start를 눌러 주세요.");
-    if (!lastQuestionId) return log("질문이 없습니다. Get current question을 먼저 눌러 주세요.");
-
-    startSpin();
+    if (!sessionId || !lastQuestionId) return log('No session or question');
+    showSpinner(true);
     try {
-      const body = { session_id: sessionId, question_id: lastQuestionId, choice };
-      const data = await fetchJson("/answer", { method: "POST", body: JSON.stringify(body) });
-      log({ endpoint: "/answer", data });
-
-      const reaction = data.assistant_reaction_text || "";
-      const idx = data.session_question_index ?? "-";
-
+      const data = await fetchJson('/answer', {
+        method: 'POST',
+        body: JSON.stringify({ session_id: sessionId, question_id: lastQuestionId, choice })
+      });
+      document.getElementById('reactionBox').style.display = 'block';
+      document.getElementById('reactionText').textContent = data.assistant_reaction_text || 'OK';
+      log({ endpoint: '/answer', data });
       if (data.session_should_end) {
-        setQuestion(null, `사노: ${reaction}\n\n(형성 완료) ${idx}/5. 이제 End를 눌러 세션을 종료해 주세요.`);
-      } else {
-        setQuestion(null, `사노: ${reaction}\n\n(저장 완료) ${idx}/5. 다음 질문은 Get current question으로 가져와 주세요.`);
+        log('Session completed! Click End to finish.');
       }
-
       await refreshState();
-      await fetchAdminProgress();
     } catch (e) {
-      logErr("sendAnswer", e);
-    } finally {
-      stopSpin();
+      log({ error: e.message });
     }
+    showSpinner(false);
   }
 
-  // topics load + render
-  function _normalizeTopics(raw) {
-    if (!raw) return [];
-    if (Array.isArray(raw)) return raw;
-    if (Array.isArray(raw.topics)) return raw.topics;
-    if (Array.isArray(raw.items)) return raw.items;
-    return [];
-  }
-
-  function renderTopics(topics) {
-    const byId = {};
-    for (const t of topics) {
-      const id = parseInt(t.id, 10);
-      if (!isNaN(id)) byId[id] = t;
-    }
-
-    topicSelect.innerHTML = "";
-    for (let i = 1; i <= 10; i++) {
-      const t = byId[i];
-      const opt = document.createElement("option");
-      opt.value = String(i);
-      opt.textContent = t?.title ? `${i}. ${t.title}` : `${i}`;
-      topicSelect.appendChild(opt);
-    }
-
-    topicsCache = topics;
-    updateTopicHint();
-  }
-
-  function updateTopicHint() {
-    const selectedId = parseInt(topicSelect.value || "0", 10);
-    const t = topicsCache.find(x => parseInt(x.id, 10) === selectedId);
-
-    topicBadge.textContent = `topic_id: ${activeTopicId ?? "-"}`;
-
-    if (!t) {
-      topicHint.textContent = "topics를 로드하면 title/description이 표시됩니다.";
-      return;
-    }
-    const title = t.title ?? "";
-    const desc = t.description ?? "";
-    topicHint.textContent = `${selectedId}. ${title} — ${desc}`;
-  }
-
-  topicSelect.addEventListener("change", updateTopicHint);
-
+  // Topics
   async function loadTopics() {
-    startSpin();
     try {
-      const data = await fetchJson("/talk/topics");
-      const topics = _normalizeTopics(data);
-      renderTopics(topics);
-      log({ endpoint: "/talk/topics", data: { count: topics.length } });
+      const data = await fetchJson('/talk/topics');
+      topicsCache = data.topics || [];
+      const sel = document.getElementById('topicSelect');
+      sel.innerHTML = '';
+      topicsCache.forEach(t => {
+        const opt = document.createElement('option');
+        opt.value = t.id;
+        opt.textContent = `${t.id}. ${t.title}`;
+        sel.appendChild(opt);
+      });
+      log({ endpoint: '/talk/topics', count: topicsCache.length });
     } catch (e) {
-      logErr("loadTopics", e);
-    } finally {
-      stopSpin();
+      log({ error: e.message });
     }
   }
 
-  /* ===== Chat UI helpers ===== */
-  function escapeHtml(s) {
-    return (s ?? "")
-      .toString()
-      .replaceAll("&", "&amp;")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;");
+  // Talk
+  function addChatMessage(role, text) {
+    const el = document.createElement('div');
+    el.className = 'message ' + role;
+    el.textContent = text;
+    document.getElementById('chatMessages').appendChild(el);
+    el.scrollIntoView({ behavior: 'smooth' });
+    return el;
   }
 
-  function nowTime() {
-    try { return new Date().toLocaleTimeString(); }
-    catch { return ""; }
-  }
-
-  function scrollChatToBottom() {
-    if (!chatList) return;
-    chatList.scrollTop = chatList.scrollHeight + 9999;
-  }
-
-  function appendChat(role, text, meta = "") {
-    if (!chatList) return null;
-
-    const row = document.createElement("div");
-    row.className = `bubbleRow ${role}`;
-
-    const bubble = document.createElement("div");
-    bubble.className = `bubble ${role}`;
-    bubble.innerHTML = escapeHtml(text);
-
-    row.appendChild(bubble);
-
-    if (meta && role !== "system") {
-      const m = document.createElement("div");
-      m.className = "chatMeta";
-      m.textContent = meta;
-      row.appendChild(m);
-    }
-
-    chatList.appendChild(row);
-    scrollChatToBottom();
-    return bubble;
-  }
-
-  function clearChatUI() {
-    if (!chatList) return;
-    chatList.innerHTML = "";
-    appendChat("system", "대화가 초기화되었습니다. Talk Start를 눌러 다시 시작해 주세요.");
-  }
-
-  function toggleChatMode() {
-    document.body.classList.toggle("mode-chat");
-    scrollChatToBottom();
-  }
-
-  /* ===== Nudge timer ===== */
-  function clearNudgeTimer() {
-    if (nudgeTimer) {
-      clearTimeout(nudgeTimer);
-      nudgeTimer = null;
-    }
-  }
-
-  function startNudgeTimer() {
-    clearNudgeTimer();
-    if (!sessionId || !activeTopicId) return;
-    if (isNudging) return; // isSending은 제거
-
-    nudgeTimer = setTimeout(async () => {
-      await callNudge();
-    }, NUDGE_DELAY_MS);
-  }
-
-
-  async function callNudge() {
-    if (!sessionId || !activeTopicId) return;
-
-    if (isSending || isNudging) {
-      startNudgeTimer();
-      return;
-    }
-    
-    isNudging = true;
-    try {
-      const body = { session_id: sessionId };
-      const data = await fetchJson("/monologue/nudge", { method: "POST", body: JSON.stringify(body) });
-
-      const nudgeText = data.monologue_text ?? data.text ?? "";
-      if (nudgeText) {
-        const bubble = appendChat("assistant", nudgeText, `${nowTime()} (nudge)`);
-        if (bubble) bubble.classList.add("nudge");
-        talkOutput.textContent = nudgeText;
-        log({ endpoint: "/monologue/nudge", data });
-      }
-    } catch (e) {
-      logErr("callNudge", e);
-    } finally {
-      isNudging = false;
-      // nudge 이후에도 다시 타이머를 걸고 싶으면 여기서 재시작
-      // startNudgeTimer();
-    }
-  }
-
-  // talk start
   async function talkStart() {
-    if (!sessionId) return log("세션이 없습니다. 먼저 Start를 눌러 주세요.");
-    const tid = parseInt(topicSelect.value || "1", 10);
-
-    startSpin();
+    if (!sessionId) return log('No session');
+    const tid = parseInt(document.getElementById('topicSelect').value);
+    showSpinner(true);
     try {
-      const body = { session_id: sessionId, topic_id: tid };
-      const data = await fetchJson("/talk/start", { method: "POST", body: JSON.stringify(body) });
-
-      const first =
-        data.assistant_first_text ??
-        data.ui_text ??
-        data.assistant_text ??
-        data.text ??
-        "";
-
+      const data = await fetchJson('/talk/start', {
+        method: 'POST',
+        body: JSON.stringify({ session_id: sessionId, topic_id: tid })
+      });
       activeTopicId = tid;
-      topicBadge.textContent = `topic_id: ${activeTopicId}`;
-      updateTopicHint();
-
-      clearChatUI();
-      appendChat("system", `대화를 시작합니다. (topic_id: ${tid})`);
-      appendChat("assistant", first || "(empty)", nowTime());
-
-      const inputEl = document.getElementById("talkInput");
-      if (inputEl) inputEl.disabled = false;
-
-      talkOutput.textContent = first || "(empty)";
-      log({ endpoint: "/talk/start", data });
-      await refreshState();
-
-      // 대화 시작 후 nudge 타이머 시작
-      startNudgeTimer();
+      document.getElementById('chatMessages').innerHTML = '';
+      addChatMessage('system', `Talk started (topic: ${tid})`);
+      const first = data.assistant_first_text || data.ui_text || '';
+      if (first) addChatMessage('assistant', first);
+      document.getElementById('talkInput').disabled = false;
+      document.getElementById('sendTalkBtn').disabled = false;
+      log({ endpoint: '/talk/start', data });
     } catch (e) {
-      logErr("talkStart", e);
-      appendChat("system", `시작 실패: ${e?.message || e}`);
-    } finally {
-      stopSpin();
+      log({ error: e.message });
     }
+    showSpinner(false);
   }
 
-  // talk turn ( /talk/turn 우선, 없으면 /talk fallback )
   async function sendTalk() {
-    if (!sessionId) return log("세션이 없습니다. 먼저 Start를 눌러 주세요.");
-    const inputEl = document.getElementById("talkInput");
-    const txt = (inputEl?.value || "").trim();
-    if (!txt) return log("메시지가 비어 있습니다.");
+    const input = document.getElementById('talkInput');
+    const text = input.value.trim();
+    if (!text || !sessionId || !activeTopicId) return;
 
-    const tid = activeTopicId ?? parseInt(topicSelect.value || "1", 10);
+    addChatMessage('user', text);
+    input.value = '';
+    const typing = addChatMessage('assistant', '...');
 
-    // 유저가 말했으니 nudge 타이머 리셋(지금부터 무응답 감지)
-    startNudgeTimer();
-
-    // 유저 말풍선
-    appendChat("user", txt, nowTime());
-    if (inputEl) inputEl.value = "";
-
-    // 타이핑 버블
-    const typingRow = document.createElement("div");
-    typingRow.className = "bubbleRow assistant";
-
-    const typingBubble = document.createElement("div");
-    typingBubble.className = "bubble assistant";
-    typingBubble.innerHTML = "…";
-
-    const typingMeta = document.createElement("div");
-    typingMeta.className = "chatMeta";
-    typingMeta.textContent = "typing";
-
-    typingRow.appendChild(typingBubble);
-    typingRow.appendChild(typingMeta);
-    chatList.appendChild(typingRow);
-    scrollChatToBottom();
-
-    isSending = true;
-    clearNudgeTimer(); // 요청 중에는 nudge가 끼지 않도록
-
-    startSpin();
     try {
-      // 1) /talk/turn 우선
-      try {
-        const body = { session_id: sessionId, topic_id: tid, user_text: txt };
-        const data = await fetchJson("/talk/turn", { method: "POST", body: JSON.stringify(body) });
-
-        const out =
-          data.assistant_text ??
-          data.ui_text ??
-          data.text ??
-          "";
-
-        typingBubble.innerHTML = escapeHtml(out || "(empty)");
-        typingMeta.textContent = nowTime();
-
-        talkOutput.textContent = out || "(empty)";
-        log({ endpoint: "/talk/turn", data });
-        await refreshState();
-
-        // 사노 응답 후 무응답 타이머 재시작
-        startNudgeTimer();
-        return;
-      } catch (e1) {
-        const msg = (e1?.message || "");
-        if (!msg.startsWith("404 ")) throw e1;
-      }
-
-      // 2) /talk fallback
-      const body2 = { session_id: sessionId, user_text: txt };
-      const data2 = await fetchJson("/talk", { method: "POST", body: JSON.stringify(body2) });
-
-      const out2 =
-        data2.assistant_text ??
-        data2.ui_text ??
-        data2.text ??
-        "";
-
-      typingBubble.innerHTML = escapeHtml(out2 || "(empty)");
-      typingMeta.textContent = nowTime();
-
-      talkOutput.textContent = out2 || "(empty)";
-      log({ endpoint: "/talk (fallback)", data: data2 });
-      await refreshState();
-
-      // 사노 응답 후 무응답 타이머 재시작
-      startNudgeTimer();
+      const data = await fetchJson('/talk/turn', {
+        method: 'POST',
+        body: JSON.stringify({ session_id: sessionId, topic_id: activeTopicId, user_text: text })
+      });
+      typing.textContent = data.ui_text || data.assistant_text || '';
+      log({ endpoint: '/talk/turn', data });
     } catch (e) {
-      logErr("sendTalk", e);
-      typingBubble.innerHTML = escapeHtml(`에러: ${e?.message || e}`);
-      typingMeta.textContent = nowTime();
-      appendChat("system", `전송 실패: ${e?.message || e}`);
-      startNudgeTimer();
-    } finally {
-      stopSpin();
-      isSending = false;
-      startNudgeTimer();
+      typing.textContent = 'Error: ' + e.message;
+      log({ error: e.message });
     }
   }
 
   async function talkEnd() {
-    if (!sessionId) return log("세션이 없습니다. 먼저 Start를 눌러 주세요.");
-
-    clearNudgeTimer();
-
-    startSpin();
+    if (!sessionId) return log('No session');
     try {
-      const body = { session_id: sessionId };
-      const data = await fetchJson("/talk/end", { method: "POST", body: JSON.stringify(body) });
-
-      appendChat("system", `대화가 종료되었습니다. (reason: ${data.end_reason ?? "talk_end"})`);
-
-      const inputEl = document.getElementById("talkInput");
-      if (inputEl) inputEl.disabled = true;
-
+      const data = await fetchJson('/talk/end', {
+        method: 'POST',
+        body: JSON.stringify({ session_id: sessionId })
+      });
+      addChatMessage('system', 'Talk ended');
+      document.getElementById('talkInput').disabled = true;
+      document.getElementById('sendTalkBtn').disabled = true;
       activeTopicId = null;
-      topicBadge.textContent = "topic_id: -";
-
-      log({ endpoint: "/talk/end", data });
-      await refreshState();
-      await refreshAdminAll?.();
+      log({ endpoint: '/talk/end', data });
     } catch (e) {
-      logErr("talkEnd", e);
-      appendChat("system", `대화 종료 실패: ${e?.message || e}`);
-    } finally {
-      stopSpin();
+      log({ error: e.message });
     }
   }
 
-  async function refreshState() {
-    startSpin();
-    try {
-      const data = await fetchJson("/state");
-      updateStatePanel(data);
-      log({ endpoint: "/state", data });
-    } catch (e) {
-      logErr("refreshState", e);
-    } finally {
-      stopSpin();
-    }
-  }
-
-  // Admin API
-  function _pct(x) {
-    if (x == null || isNaN(x)) return "-";
-    return `${Math.round(x * 1000) / 10}%`;
-  }
-
-  async function fetchAdminProgress() {
-    startSpin();
-    try {
-      const data = await fetchJson("/admin/progress");
-      admAnswered.textContent = data.answered_count ?? "-";
-      admMax.textContent = data.max_questions ?? "-";
-      admRatio.textContent = _pct(data.progress_ratio);
-      admPhase.textContent = data.phase ?? "-";
-      admCurrentQ.textContent = data.current_question ?? "-";
-      log({ endpoint: "/admin/progress", data });
-    } catch (e) {
-      logErr("fetchAdminProgress", e);
-    } finally {
-      stopSpin();
-    }
-  }
-
-  function renderSessionsTable(resp) {
-    const sessions = resp?.sessions || [];
-    if (!sessions.length) return "(세션 없음)";
-
-    let html = "<table>";
-    html += "<thead><tr>";
-    html += "<th class='right'>id</th>";
-    html += "<th>name</th>";
-    html += "<th>started</th>";
-    html += "<th>ended</th>";
-    html += "<th>reason</th>";
-    html += "</tr></thead><tbody>";
-
-    for (const s of sessions) {
-      html += "<tr>";
-      html += `<td class='right'>${s.id ?? ""}</td>`;
-      html += `<td>${(s.visitor_name ?? "").toString().replaceAll("<","&lt;")}</td>`;
-      html += `<td>${s.started_at ?? ""}</td>`;
-      html += `<td>${s.ended_at ?? ""}</td>`;
-      html += `<td>${s.end_reason ?? ""}</td>`;
-      html += "</tr>";
-    }
-
-    html += "</tbody></table>";
-    return html;
-  }
-
-  async function fetchAdminSessions() {
-    startSpin();
-    try {
-      const limit = parseInt(document.getElementById("admLimit").value || "20", 10);
-      const offset = parseInt(document.getElementById("admOffset").value || "0", 10);
-      const data = await fetchJson(`/admin/sessions?limit=${encodeURIComponent(limit)}&offset=${encodeURIComponent(offset)}`);
-      admSessionsBox.innerHTML = renderSessionsTable(data);
-      log({ endpoint: "/admin/sessions", data: { total: data.total, shown: (data.sessions||[]).length } });
-    } catch (e) {
-      admSessionsBox.textContent = "(불러오기 실패)";
-      logErr("fetchAdminSessions", e);
-    } finally {
-      stopSpin();
-    }
-  }
-
-  async function refreshAdminAll() {
-    await fetchAdminProgress();
-    await fetchAdminSessions();
-  }
-
-  async function adminReset() {
-    startSpin();
-    try {
-      const body = {
-        reset_answers: !!document.getElementById("resetAnswers").checked,
-        reset_sessions: !!document.getElementById("resetSessions").checked,
-        reset_state: !!document.getElementById("resetState").checked,
-        reset_personality: !!document.getElementById("resetPsanoPersonality").checked,
-      };
-      const data = await fetchJson("/admin/reset", { method: "POST", body: JSON.stringify(body) });
-      log({ endpoint: "/admin/reset", data });
-      await refreshState();
-      await refreshAdminAll();
-      setQuestion(null, "아직 질문 없음");
-      activeTopicId = null;
-      topicBadge.textContent = "topic_id: -";
-      clearChatUI();
-      clearNudgeTimer();
-
-      const inputEl = document.getElementById("talkInput");
-      if (inputEl) inputEl.disabled = true;
-
-    } catch (e) {
-      logErr("adminReset", e);
-    } finally {
-      stopSpin();
-    }
-  }
-
-  async function adminSetPhase() {
-    startSpin();
-    try {
-      const phase = document.getElementById("admPhaseSelect").value;
-      const data = await fetchJson("/admin/phase/set", { method: "POST", body: JSON.stringify({ phase }) });
-      log({ endpoint: "/admin/phase/set", data });
-      await refreshState();
-      await refreshAdminAll();
-    } catch (e) {
-      logErr("adminSetPhase", e);
-    } finally {
-      stopSpin();
-    }
-  }
-
-  async function adminSetCurrentQuestion() {
-    startSpin();
-    try {
-      const q = parseInt(document.getElementById("admSetQ").value || "1", 10);
-      const data = await fetchJson("/admin/state/set_current_question", { method: "POST", body: JSON.stringify({ current_question: q }) });
-      log({ endpoint: "/admin/state/set_current_question", data });
-      await refreshState();
-      await refreshAdminAll();
-    } catch (e) {
-      logErr("adminSetCurrentQuestion", e);
-    } finally {
-      stopSpin();
-    }
-  }
-
-  async function adminImportQuestions() {
-    const fileEl = document.getElementById("admXlsxFile");
-    if (!fileEl || !fileEl.files || !fileEl.files.length) {
-      return log("xlsx 파일이 없습니다. 파일 선택 후 Upload를 눌러 주세요.");
-    }
-
-    const file = fileEl.files[0];
-    if (!file.name.toLowerCase().endsWith(".xlsx")) {
-      return log("xlsx만 업로드 가능합니다. (.xlsx)");
-    }
-
-    startSpin();
-    try {
-      const fd = new FormData();
-      fd.append("file", file);
-      const data = await fetchMultipart("/admin/questions/import", fd, {});
-      log({ endpoint: "/admin/questions/import", data });
-      await refreshAdminAll();
-    } catch (e) {
-      logErr("adminImportQuestions", e);
-    } finally {
-      stopSpin();
-    }
-  }
-  
-    async function adminImportSettings() {
-    const fileEl = document.getElementById("admSettingsXlsxFile");
-    if (!fileEl || !fileEl.files || !fileEl.files.length) {
-      return log("settings xlsx 파일이 없습니다. 파일 선택 후 Upload를 눌러 주세요.");
-    }
-
-    const file = fileEl.files[0];
-    if (!file.name.toLowerCase().endsWith(".xlsx")) {
-      return log("xlsx만 업로드 가능합니다. (.xlsx)");
-    }
-
-    startSpin();
-    try {
-      const fd = new FormData();
-      fd.append("file", file);
-      const data = await fetchMultipart("/admin/settings/import", fd, {});
-      log({ endpoint: "/admin/settings/import", data });
-      await refreshAdminAll();
-    } catch (e) {
-      logErr("adminImportSettings", e);
-    } finally {
-      stopSpin();
-    }
-  }
-
-  async function personaGenerate() {
-    startSpin();
-    try {
-      const model = (document.getElementById("personaModel").value || "").trim();
-      const maxTokensRaw = (document.getElementById("personaMaxTokens").value || "").trim();
-      const force = !!document.getElementById("personaForce").checked;
-
-      const body = {};
-      if (model) body.model = model;
-
-      if (maxTokensRaw) {
-        const n = parseInt(maxTokensRaw, 10);
-        if (!isNaN(n) && n > 0) body.max_output_tokens = n;
-      }
-
-      if (force) body.force = true;
-
-      const data = await fetchJson("/persona/generate", { method: "POST", body: JSON.stringify(body) });
-      log({ endpoint: "/persona/generate", data });
-      await refreshState();
-      await refreshAdminAll();
-    } catch (e) {
-      logErr("personaGenerate", e);
-    } finally {
-      stopSpin();
-    }
-  }
-
-  async function fetchAdminPersonality() {
-    startSpin();
-    try {
-      const data = await fetchJson("/admin/personality");
-      document.getElementById("pSelfDirection").value = data.self_direction ?? 0;
-      document.getElementById("pConformity").value = data.conformity ?? 0;
-      document.getElementById("pStimulation").value = data.stimulation ?? 0;
-      document.getElementById("pSecurity").value = data.security ?? 0;
-      document.getElementById("pHedonism").value = data.hedonism ?? 0;
-      document.getElementById("pTradition").value = data.tradition ?? 0;
-      document.getElementById("pAchievement").value = data.achievement ?? 0;
-      document.getElementById("pBenevolence").value = data.benevolence ?? 0;
-      document.getElementById("pPower").value = data.power ?? 0;
-      document.getElementById("pUniversalism").value = data.universalism ?? 0;
-      log({ endpoint: "/admin/personality", data });
-    } catch (e) {
-      logErr("fetchAdminPersonality", e);
-    } finally {
-      stopSpin();
-    }
-  }
-
-  async function adminSetPersonality() {
-    startSpin();
-    try {
-      const body = {
-        self_direction: parseInt(document.getElementById("pSelfDirection").value || "0", 10),
-        conformity: parseInt(document.getElementById("pConformity").value || "0", 10),
-        stimulation: parseInt(document.getElementById("pStimulation").value || "0", 10),
-        security: parseInt(document.getElementById("pSecurity").value || "0", 10),
-        hedonism: parseInt(document.getElementById("pHedonism").value || "0", 10),
-        tradition: parseInt(document.getElementById("pTradition").value || "0", 10),
-        achievement: parseInt(document.getElementById("pAchievement").value || "0", 10),
-        benevolence: parseInt(document.getElementById("pBenevolence").value || "0", 10),
-        power: parseInt(document.getElementById("pPower").value || "0", 10),
-        universalism: parseInt(document.getElementById("pUniversalism").value || "0", 10),
-      };
-      const data = await fetchJson("/admin/personality/set", { method: "POST", body: JSON.stringify(body) });
-      log({ endpoint: "/admin/personality/set", data });
-    } catch (e) {
-      logErr("adminSetPersonality", e);
-    } finally {
-      stopSpin();
-    }
-  }
-
-  // Enter 전송(Shift+Enter 줄바꿈)
-  document.getElementById("talkInput")?.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+  document.getElementById('talkInput').addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       sendTalk();
     }
   });
 
-  // 입력 중이면 무응답 타이머 리셋(입력 중인데 nudge 튀는 거 방지)
-  document.getElementById("talkInput")?.addEventListener("input", () => {
-    startNudgeTimer();
-  });
+  // Admin
+  async function fetchAdminProgress() {
+    try {
+      const data = await fetchJson('/admin/progress');
+      document.getElementById('admAnswered').textContent = data.answered_count ?? '-';
+      document.getElementById('admMax').textContent = data.max_questions ?? '-';
+      document.getElementById('admRatio').textContent = Math.round((data.progress_ratio || 0) * 100) + '%';
+      document.getElementById('admPhase').textContent = data.phase ?? '-';
+      log({ endpoint: '/admin/progress', data });
+    } catch (e) {
+      log({ error: e.message });
+    }
+  }
 
-  // 초기 로드
+  async function fetchAdminSessions() {
+    const limit = document.getElementById('admLimit').value;
+    const offset = document.getElementById('admOffset').value;
+    try {
+      const data = await fetchJson(`/admin/sessions?limit=${limit}&offset=${offset}`);
+      const sessions = data.sessions || [];
+      let html = '<table><thead><tr><th>ID</th><th>Name</th><th>Started</th><th>Ended</th><th>Reason</th></tr></thead><tbody>';
+      sessions.forEach(s => {
+        html += `<tr><td>${s.id}</td><td>${s.visitor_name || ''}</td><td>${s.started_at || ''}</td><td>${s.ended_at || ''}</td><td>${s.end_reason || ''}</td></tr>`;
+      });
+      html += '</tbody></table>';
+      document.getElementById('admSessionsBox').innerHTML = html;
+      log({ endpoint: '/admin/sessions', total: data.total });
+    } catch (e) {
+      log({ error: e.message });
+    }
+  }
+
+  async function adminReset() {
+    const body = {
+      reset_answers: document.getElementById('resetAnswers').checked,
+      reset_sessions: document.getElementById('resetSessions').checked,
+      reset_state: document.getElementById('resetState').checked,
+      reset_personality: document.getElementById('resetPersonality').checked
+    };
+    try {
+      const data = await fetchJson('/admin/reset', { method: 'POST', body: JSON.stringify(body) });
+      log({ endpoint: '/admin/reset', data });
+      await refreshState();
+      await fetchAdminProgress();
+    } catch (e) {
+      log({ error: e.message });
+    }
+  }
+
+  async function adminSetPhase() {
+    const phase = document.getElementById('admPhaseSelect').value;
+    try {
+      const data = await fetchJson('/admin/phase/set', { method: 'POST', body: JSON.stringify({ phase }) });
+      log({ endpoint: '/admin/phase/set', data });
+      await refreshState();
+    } catch (e) {
+      log({ error: e.message });
+    }
+  }
+
+  async function adminSetCurrentQuestion() {
+    const q = parseInt(document.getElementById('admSetQ').value);
+    try {
+      const data = await fetchJson('/admin/state/set_current_question', { method: 'POST', body: JSON.stringify({ current_question: q }) });
+      log({ endpoint: '/admin/state/set_current_question', data });
+      await refreshState();
+    } catch (e) {
+      log({ error: e.message });
+    }
+  }
+
+  async function adminImportQuestions() {
+    const file = document.getElementById('admXlsxFile').files[0];
+    if (!file) return log('No file selected');
+    const fd = new FormData();
+    fd.append('file', file);
+    try {
+      const data = await fetchMultipart('/admin/questions/import', fd);
+      log({ endpoint: '/admin/questions/import', data });
+    } catch (e) {
+      log({ error: e.message });
+    }
+  }
+
+  async function adminImportSettings() {
+    const file = document.getElementById('admSettingsXlsxFile').files[0];
+    if (!file) return log('No file selected');
+    const fd = new FormData();
+    fd.append('file', file);
+    try {
+      const data = await fetchMultipart('/admin/settings/import', fd);
+      log({ endpoint: '/admin/settings/import', data });
+    } catch (e) {
+      log({ error: e.message });
+    }
+  }
+
+  async function personaGenerate() {
+    const body = {};
+    const model = document.getElementById('personaModel').value.trim();
+    const maxTokens = document.getElementById('personaMaxTokens').value;
+    if (model) body.model = model;
+    if (maxTokens) body.max_output_tokens = parseInt(maxTokens);
+    if (document.getElementById('personaForce').checked) body.force = true;
+
+    showSpinner(true);
+    try {
+      const data = await fetchJson('/persona/generate', { method: 'POST', body: JSON.stringify(body) });
+      log({ endpoint: '/persona/generate', data });
+      await refreshState();
+    } catch (e) {
+      log({ error: e.message });
+    }
+    showSpinner(false);
+  }
+
+  async function fetchAdminPersonality() {
+    try {
+      const data = await fetchJson('/admin/personality');
+      document.getElementById('pSelfDirection').value = data.self_direction ?? 0;
+      document.getElementById('pConformity').value = data.conformity ?? 0;
+      document.getElementById('pStimulation').value = data.stimulation ?? 0;
+      document.getElementById('pSecurity').value = data.security ?? 0;
+      document.getElementById('pHedonism').value = data.hedonism ?? 0;
+      document.getElementById('pTradition').value = data.tradition ?? 0;
+      document.getElementById('pAchievement').value = data.achievement ?? 0;
+      document.getElementById('pBenevolence').value = data.benevolence ?? 0;
+      document.getElementById('pPower').value = data.power ?? 0;
+      document.getElementById('pUniversalism').value = data.universalism ?? 0;
+      log({ endpoint: '/admin/personality', data });
+    } catch (e) {
+      log({ error: e.message });
+    }
+  }
+
+  async function adminSetPersonality() {
+    const body = {
+      self_direction: parseInt(document.getElementById('pSelfDirection').value) || 0,
+      conformity: parseInt(document.getElementById('pConformity').value) || 0,
+      stimulation: parseInt(document.getElementById('pStimulation').value) || 0,
+      security: parseInt(document.getElementById('pSecurity').value) || 0,
+      hedonism: parseInt(document.getElementById('pHedonism').value) || 0,
+      tradition: parseInt(document.getElementById('pTradition').value) || 0,
+      achievement: parseInt(document.getElementById('pAchievement').value) || 0,
+      benevolence: parseInt(document.getElementById('pBenevolence').value) || 0,
+      power: parseInt(document.getElementById('pPower').value) || 0,
+      universalism: parseInt(document.getElementById('pUniversalism').value) || 0
+    };
+    try {
+      const data = await fetchJson('/admin/personality/set', { method: 'POST', body: JSON.stringify(body) });
+      log({ endpoint: '/admin/personality/set', data });
+    } catch (e) {
+      log({ error: e.message });
+    }
+  }
+
+  // Init
   checkHealth();
   refreshState();
-  fetchAdminProgress();
   loadTopics();
-
-  // 초기에는 talk input 비활성 (talkStart 성공 시 활성)
-  const _initInput = document.getElementById("talkInput");
-  if (_initInput) _initInput.disabled = true;
+  fetchAdminProgress();
 </script>
 
 </body>

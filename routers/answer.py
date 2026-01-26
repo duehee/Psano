@@ -117,9 +117,9 @@ def post_answer(req: AnswerRequest, db: Session = Depends(get_db)):
     qid = int(req.question_id)
     choice = req.choice
 
-    # 0) 세션 존재/종료 체크
+    # 0) 세션 존재/종료 체크 + start_question_id 조회
     ses = db.execute(
-        text("SELECT id, ended_at FROM sessions WHERE id = :sid"),
+        text("SELECT id, ended_at, start_question_id FROM sessions WHERE id = :sid"),
         {"sid": sid}
     ).mappings().first()
 
@@ -127,6 +127,8 @@ def post_answer(req: AnswerRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail=f"session not found: {sid}")
     if ses["ended_at"] is not None:
         raise HTTPException(status_code=409, detail="session already ended")
+
+    start_question_id = int(ses.get("start_question_id") or 1)
 
     # 중복 제출 방지: 같은 session_id + question_id 이미 있으면 409
     dup = db.execute(
@@ -174,23 +176,21 @@ def post_answer(req: AnswerRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail=f"invalid chosen_value_key: {chosen_value_key}")
 
     try:
-        # current_question 일치 검증 (전역 번호 꼬임 방지)
-        st = db.execute(
-            text("""
-                SELECT current_question
-                FROM psano_state
-                WHERE id = 1
-            """)
+        # 세션 내 답변 순서 검증: start_question_id + 현재답변수 == 제출 question_id
+        cnt_before = db.execute(
+            text("SELECT COUNT(*) AS cnt FROM answers WHERE session_id = :sid"),
+            {"sid": sid}
         ).mappings().first()
+        answered_before = int(cnt_before["cnt"]) if cnt_before else 0
 
-        if not st:
-            raise HTTPException(status_code=500, detail="psano_state(id=1) not found")
+        expected_qid = start_question_id + answered_before
+        if qid != expected_qid:
+            raise HTTPException(
+                status_code=409,
+                detail=f"question_id mismatch: expected {expected_qid}, got {qid}"
+            )
 
-        current_q = int(st["current_question"])
-        if current_q != qid:
-            raise HTTPException(status_code=409, detail="question_id mismatch with current_question")
-
-        # 4) answers 저장
+        # 4) answers 저장 (psano_personality, current_question은 세션 종료 시 일괄 반영)
         db.execute(
             text("""
                 INSERT INTO answers (session_id, question_id, choice, chosen_value_key)
@@ -199,49 +199,11 @@ def post_answer(req: AnswerRequest, db: Session = Depends(get_db)):
             {"sid": sid, "qid": qid, "choice": choice, "chosen_value_key": chosen_value_key}
         )
 
-        # 5) psano_personality +1
-        col = chosen_value_key
-        db.execute(
-            text(f"UPDATE psano_personality SET `{col}` = `{col}` + 1 WHERE id = 1")
-        )
-
-        # 6) session_question_index 계산(방금 저장했으니 COUNT가 곧 index)
-        cnt_row = db.execute(
-            text("SELECT COUNT(*) AS cnt FROM answers WHERE session_id = :sid"),
-            {"sid": sid}
-        ).mappings().first()
-        answered_cnt = int(cnt_row["cnt"]) if cnt_row else 0
-        session_question_index = answered_cnt
+        # 5) session_question_index 계산 (방금 저장했으니 +1)
+        session_question_index = answered_before + 1
         session_should_end = (session_question_index >= SESSION_QUESTION_LIMIT)
 
-        # 다음 질문을 current+1이 아니라 "다음 enabled"로 세팅 (안정)
-        next_q = db.execute(
-            text("""
-                SELECT id
-                FROM questions
-                WHERE id > :qid AND enabled = 1
-                ORDER BY id ASC
-                LIMIT 1
-            """),
-            {"qid": current_q}
-        ).mappings().first()
-
-        if next_q:
-            new_current_q = int(next_q["id"])
-        else:
-            # 더 없으면 formation 완료로 처리되게 MAX+1로 보내기
-            new_current_q = MAX_QUESTIONS + 1
-
-        db.execute(
-            text("""
-                UPDATE psano_state
-                SET current_question = :new_q
-                WHERE id = 1
-            """),
-            {"new_q": new_current_q}
-        )
-
-        # 7) 전역 answered_total 계산 (GPT 반응 성장단계용)
+        # 6) 전역 answered_total 계산 (GPT 반응 성장단계용)
         total_row = db.execute(
             text("SELECT COUNT(*) AS cnt FROM answers")
         ).mappings().first()
@@ -256,10 +218,32 @@ def post_answer(req: AnswerRequest, db: Session = Depends(get_db)):
         db.rollback()
         raise HTTPException(status_code=500, detail=f"db error: {e}")
 
-    # next_question은 세션 종료면 None, 아니면 다음 current_question(단, formation 끝났으면 None)
+    # next_question: 세션 종료 전이면 다음 질문 번호
     next_question = None
-    if not session_should_end and new_current_q <= MAX_QUESTIONS:
-        next_question = new_current_q
+    if not session_should_end:
+        # 다음 enabled 질문 찾기
+        next_q = db.execute(
+            text("""
+                SELECT id
+                FROM questions
+                WHERE id > :qid AND enabled = 1
+                ORDER BY id ASC
+                LIMIT 1
+            """),
+            {"qid": qid}
+        ).mappings().first()
+        if next_q:
+            next_question = int(next_q["id"])
+            # psano_state.current_question 업데이트
+            db.execute(
+                text("""
+                    UPDATE psano_state
+                    SET current_question = :next_q
+                    WHERE id = 1
+                """),
+                {"next_q": next_question}
+            )
+            db.commit()
 
     # GPT 반응 생성 (성장단계 스타일 반영)
     question_text = q.get("question_text") or ""

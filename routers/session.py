@@ -21,7 +21,7 @@ def _read_session_row(db: Session, sid: int):
     return db.execute(
         text("""
             SELECT id, visitor_name, started_at, ended_at, end_reason,
-                   topic_id, talk_memory, turn_count
+                   topic_id, talk_memory, turn_count, start_question_id
             FROM sessions
             WHERE id = :sid
         """),
@@ -38,14 +38,20 @@ def start_session(req: SessionStartRequest, db: Session = Depends(get_db)):
     try:
         started_at = now_kst_naive()  # KST +9
 
+        # 현재 질문 번호 조회 (teach phase용 start_question_id)
+        st = db.execute(
+            text("SELECT current_question FROM psano_state WHERE id = 1")
+        ).mappings().first()
+        start_question_id = int(st["current_question"]) if st else 1
+
         # teach/talk 여부와 상관없이 "세션 기본 정보만" 생성
-        # talk 관련(topic_id/talk_memory/turn_count)은 절대 건드리지 않음
+        # start_question_id: 타임아웃 시 롤백용
         result = db.execute(
             text("""
-                INSERT INTO sessions (visitor_name, started_at)
-                VALUES (:visitor_name, :started_at)
+                INSERT INTO sessions (visitor_name, started_at, start_question_id)
+                VALUES (:visitor_name, :started_at, :start_question_id)
             """),
-            {"visitor_name": name, "started_at": started_at},
+            {"visitor_name": name, "started_at": started_at, "start_question_id": start_question_id},
         )
         db.commit()
 
@@ -65,6 +71,7 @@ def start_session(req: SessionStartRequest, db: Session = Depends(get_db)):
             "started_at": started_at,   # datetime
             "ended_at": None,
             "end_reason": None,
+            "start_question_id": start_question_id,  # 타임아웃 롤백용
             # talk 전용은 "아직 시작 안 함" 상태로 둠
             "topic_id": None,
             "talk_memory": None,
@@ -74,7 +81,7 @@ def start_session(req: SessionStartRequest, db: Session = Depends(get_db)):
         return {
             "session_id": sid,
             "phase": GLOBAL_STATE["phase"],
-            "current_question": int(GLOBAL_STATE["current_question"]),
+            "current_question": start_question_id,
         }
 
 

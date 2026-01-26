@@ -9,8 +9,7 @@ from sqlalchemy import text
 from database import get_db
 from schemas.persona import PersonaGenerateRequest, PersonaGenerateResponse
 from utils import now_kst_naive, iso
-
-from routers.talk import client
+from services.llm_service import client
 
 router = APIRouter()
 
