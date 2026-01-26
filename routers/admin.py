@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 from database import get_db
-from utils import iso, now_kst_naive
+from utils import iso, now_kst_naive, get_config
 from routers.persona import _generate_persona
 from schemas.admin import (
     AdminSessionsResponse, AdminProgressResponse,
@@ -29,7 +29,8 @@ except ImportError:
 
 router = APIRouter()
 
-MAX_QUESTIONS = 380
+# 하드코딩 fallback (DB 없을 때)
+_DEFAULT_MAX_QUESTIONS = 380
 
 # (선택) 최소 인증 토큰: 환경변수 ADMIN_TOKEN 설정 시 강제
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN")
@@ -463,6 +464,9 @@ def list_sessions(
 
 @router.get("/progress", response_model=AdminProgressResponse)
 def get_progress(db: Session = Depends(get_db)):
+    # 설정 로드
+    max_questions = get_config(db, "max_questions", _DEFAULT_MAX_QUESTIONS)
+
     st = db.execute(
         text("SELECT phase, current_question FROM psano_state WHERE id = 1")
     ).mappings().first()
@@ -475,14 +479,14 @@ def get_progress(db: Session = Depends(get_db)):
         phase = "teach"
 
     current_q = int(st["current_question"])
-    answered = MAX_QUESTIONS if phase == "talk" else max(0, min(MAX_QUESTIONS, current_q - 1))
-    ratio = float(answered) / float(MAX_QUESTIONS) if MAX_QUESTIONS > 0 else 0.0
+    answered = max_questions if phase == "talk" else max(0, min(max_questions, current_q - 1))
+    ratio = float(answered) / float(max_questions) if max_questions > 0 else 0.0
 
     return {
         "phase": phase,
         "current_question": current_q,
         "answered_count": answered,
-        "max_questions": MAX_QUESTIONS,
+        "max_questions": max_questions,
         "progress_ratio": ratio,
     }
 
@@ -548,7 +552,6 @@ def admin_reset(req: AdminResetRequest, db: Session = Depends(get_db)):
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"db error: {e}")
-
 
 @router.post("/phase/set", response_model=AdminPhaseSetResponse)
 def admin_set_phase(req: AdminPhaseSetRequest, db: Session = Depends(get_db)):
@@ -708,3 +711,589 @@ def admin_persona_generate(req: PersonaGenerateRequest, db: Session = Depends(ge
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"admin persona generate failed: {e}")
+
+
+# =========================
+# Config 관리 (psano_config)
+# =========================
+
+@router.get("/config")
+def admin_config_list(db: Session = Depends(get_db)):
+    """전체 설정 조회"""
+    try:
+        rows = db.execute(
+            text("SELECT config_key, config_value, value_type, description, updated_at FROM psano_config ORDER BY config_key")
+        ).mappings().all()
+
+        configs = [{
+            "key": r["config_key"],
+            "value": r["config_value"],
+            "type": r["value_type"],
+            "description": r["description"],
+            "updated_at": iso(r["updated_at"]),
+        } for r in rows]
+
+        return {"configs": configs}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"db error: {e}")
+
+
+@router.put("/config/{key}")
+def admin_config_update(
+    key: str,
+    db: Session = Depends(get_db),
+    value: str = Query(...),
+    value_type: Optional[str] = Query(None),
+):
+    """단일 설정 수정"""
+    try:
+        # 존재 여부 확인
+        existing = db.execute(
+            text("SELECT config_key FROM psano_config WHERE config_key = :key"),
+            {"key": key}
+        ).mappings().first()
+
+        if not existing:
+            raise HTTPException(status_code=404, detail=f"config not found: {key}")
+
+        if value_type:
+            db.execute(
+                text("UPDATE psano_config SET config_value = :value, value_type = :vtype WHERE config_key = :key"),
+                {"key": key, "value": value, "vtype": value_type}
+            )
+        else:
+            db.execute(
+                text("UPDATE psano_config SET config_value = :value WHERE config_key = :key"),
+                {"key": key, "value": value}
+            )
+
+        db.commit()
+        return {"ok": True, "key": key, "value": value}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"db error: {e}")
+
+
+@router.post("/config/clear-cache")
+def admin_config_clear_cache():
+    """설정 캐시 초기화"""
+    from utils import clear_config_cache
+    clear_config_cache()
+    return {"ok": True, "message": "config cache cleared"}
+
+
+# =========================
+# Prompts 관리 (psano_prompts)
+# =========================
+
+@router.get("/prompts")
+def admin_prompts_list(db: Session = Depends(get_db)):
+    """전체 프롬프트 조회"""
+    try:
+        rows = db.execute(
+            text("SELECT prompt_key, prompt_template, description, updated_at FROM psano_prompts ORDER BY prompt_key")
+        ).mappings().all()
+
+        prompts = [{
+            "key": r["prompt_key"],
+            "template": r["prompt_template"],
+            "description": r["description"],
+            "updated_at": iso(r["updated_at"]),
+        } for r in rows]
+
+        return {"prompts": prompts}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"db error: {e}")
+
+
+@router.get("/prompts/{key}")
+def admin_prompt_get(key: str, db: Session = Depends(get_db)):
+    """단일 프롬프트 조회"""
+    try:
+        row = db.execute(
+            text("SELECT prompt_key, prompt_template, description, updated_at FROM psano_prompts WHERE prompt_key = :key"),
+            {"key": key}
+        ).mappings().first()
+
+        if not row:
+            raise HTTPException(status_code=404, detail=f"prompt not found: {key}")
+
+        return {
+            "key": row["prompt_key"],
+            "template": row["prompt_template"],
+            "description": row["description"],
+            "updated_at": iso(row["updated_at"]),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"db error: {e}")
+
+
+@router.put("/prompts/{key}")
+def admin_prompt_update(
+    key: str,
+    db: Session = Depends(get_db),
+    template: str = Query(...),
+    description: Optional[str] = Query(None),
+):
+    """단일 프롬프트 수정"""
+    try:
+        existing = db.execute(
+            text("SELECT prompt_key FROM psano_prompts WHERE prompt_key = :key"),
+            {"key": key}
+        ).mappings().first()
+
+        if not existing:
+            raise HTTPException(status_code=404, detail=f"prompt not found: {key}")
+
+        if description is not None:
+            db.execute(
+                text("UPDATE psano_prompts SET prompt_template = :template, description = :desc WHERE prompt_key = :key"),
+                {"key": key, "template": template, "desc": description}
+            )
+        else:
+            db.execute(
+                text("UPDATE psano_prompts SET prompt_template = :template WHERE prompt_key = :key"),
+                {"key": key, "template": template}
+            )
+
+        db.commit()
+        return {"ok": True, "key": key}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"db error: {e}")
+
+
+@router.post("/prompts/clear-cache")
+def admin_prompts_clear_cache():
+    """프롬프트 캐시 초기화"""
+    from utils import clear_prompt_cache
+    clear_prompt_cache()
+    return {"ok": True, "message": "prompt cache cleared"}
+
+
+# =========================
+# Questions 조회/관리
+# =========================
+
+@router.get("/questions")
+def admin_questions_list(
+    db: Session = Depends(get_db),
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    enabled_only: bool = Query(False),
+):
+    """질문 목록 조회"""
+    try:
+        where_clause = "WHERE enabled = 1" if enabled_only else ""
+
+        total_row = db.execute(
+            text(f"SELECT COUNT(*) AS cnt FROM questions {where_clause}")
+        ).mappings().first()
+        total = int(total_row["cnt"]) if total_row else 0
+
+        rows = db.execute(
+            text(f"""
+                SELECT id, axis_key, question_text, choice_a, choice_b, enabled, value_a_key, value_b_key
+                FROM questions
+                {where_clause}
+                ORDER BY id ASC
+                LIMIT :limit OFFSET :offset
+            """),
+            {"limit": limit, "offset": offset}
+        ).mappings().all()
+
+        questions = [{
+            "id": int(r["id"]),
+            "axis_key": r["axis_key"],
+            "question_text": r["question_text"],
+            "choice_a": r["choice_a"],
+            "choice_b": r["choice_b"],
+            "enabled": bool(r["enabled"]),
+            "value_a_key": r["value_a_key"],
+            "value_b_key": r["value_b_key"],
+        } for r in rows]
+
+        return {"total": total, "questions": questions}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"db error: {e}")
+
+
+@router.put("/questions/{question_id}/toggle")
+def admin_question_toggle(
+    question_id: int,
+    db: Session = Depends(get_db),
+):
+    """질문 enabled 토글"""
+    try:
+        row = db.execute(
+            text("SELECT id, enabled FROM questions WHERE id = :id"),
+            {"id": question_id}
+        ).mappings().first()
+
+        if not row:
+            raise HTTPException(status_code=404, detail=f"question not found: {question_id}")
+
+        new_enabled = 0 if row["enabled"] else 1
+        db.execute(
+            text("UPDATE questions SET enabled = :enabled WHERE id = :id"),
+            {"id": question_id, "enabled": new_enabled}
+        )
+        db.commit()
+
+        return {"ok": True, "id": question_id, "enabled": bool(new_enabled)}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"db error: {e}")
+
+
+# =========================
+# Growth Stages 조회/관리
+# =========================
+
+@router.get("/growth-stages")
+def admin_growth_stages_list(db: Session = Depends(get_db)):
+    """성장단계 목록 조회"""
+    try:
+        rows = db.execute(
+            text("""
+                SELECT stage_id, stage_name_kr, stage_name_en, min_answers, max_answers,
+                       metaphor_density, certainty, sentence_length, empathy_level, notes, idle_greeting
+                FROM psano_growth_stages
+                ORDER BY stage_id ASC
+            """)
+        ).mappings().all()
+
+        stages = [{
+            "stage_id": int(r["stage_id"]),
+            "stage_name_kr": r["stage_name_kr"],
+            "stage_name_en": r["stage_name_en"],
+            "min_answers": int(r["min_answers"]),
+            "max_answers": int(r["max_answers"]),
+            "metaphor_density": float(r["metaphor_density"]) if r["metaphor_density"] else None,
+            "certainty": float(r["certainty"]) if r["certainty"] else None,
+            "sentence_length": r["sentence_length"],
+            "empathy_level": float(r["empathy_level"]) if r["empathy_level"] else None,
+            "notes": r["notes"],
+            "idle_greeting": r.get("idle_greeting"),
+        } for r in rows]
+
+        return {"stages": stages}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"db error: {e}")
+
+
+@router.put("/growth-stages/{stage_id}")
+def admin_growth_stage_update(
+    stage_id: int,
+    db: Session = Depends(get_db),
+    idle_greeting: Optional[str] = Query(None),
+    notes: Optional[str] = Query(None),
+):
+    """성장단계 수정 (idle_greeting, notes)"""
+    try:
+        row = db.execute(
+            text("SELECT stage_id FROM psano_growth_stages WHERE stage_id = :id"),
+            {"id": stage_id}
+        ).mappings().first()
+
+        if not row:
+            raise HTTPException(status_code=404, detail=f"stage not found: {stage_id}")
+
+        updates = []
+        params = {"id": stage_id}
+
+        if idle_greeting is not None:
+            updates.append("idle_greeting = :idle_greeting")
+            params["idle_greeting"] = idle_greeting
+
+        if notes is not None:
+            updates.append("notes = :notes")
+            params["notes"] = notes
+
+        if not updates:
+            return {"ok": True, "message": "nothing to update"}
+
+        db.execute(
+            text(f"UPDATE psano_growth_stages SET {', '.join(updates)} WHERE stage_id = :id"),
+            params
+        )
+        db.commit()
+
+        return {"ok": True, "stage_id": stage_id}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"db error: {e}")
+
+
+# =========================
+# Session 상세 (Answers)
+# =========================
+
+@router.get("/sessions/{session_id}/answers")
+def admin_session_answers(
+    session_id: int,
+    db: Session = Depends(get_db),
+):
+    """세션의 답변 목록 조회"""
+    try:
+        # 세션 정보
+        sess = db.execute(
+            text("SELECT id, visitor_name, started_at, ended_at, end_reason FROM sessions WHERE id = :id"),
+            {"id": session_id}
+        ).mappings().first()
+
+        if not sess:
+            raise HTTPException(status_code=404, detail=f"session not found: {session_id}")
+
+        # 답변 목록
+        rows = db.execute(
+            text("""
+                SELECT a.id, a.question_id, a.choice, a.chosen_value_key, a.assistant_reaction, a.created_at,
+                       q.question_text, q.choice_a, q.choice_b
+                FROM answers a
+                LEFT JOIN questions q ON a.question_id = q.id
+                WHERE a.session_id = :sid
+                ORDER BY a.id ASC
+            """),
+            {"sid": session_id}
+        ).mappings().all()
+
+        answers = [{
+            "id": int(r["id"]),
+            "question_id": int(r["question_id"]),
+            "question_text": r["question_text"],
+            "choice": r["choice"],
+            "choice_text": r["choice_a"] if r["choice"] == "A" else r["choice_b"],
+            "chosen_value_key": r["chosen_value_key"],
+            "assistant_reaction": r["assistant_reaction"],
+            "created_at": iso(r["created_at"]),
+        } for r in rows]
+
+        return {
+            "session": {
+                "id": int(sess["id"]),
+                "visitor_name": sess["visitor_name"],
+                "started_at": iso(sess["started_at"]),
+                "ended_at": iso(sess["ended_at"]),
+                "end_reason": sess.get("end_reason"),
+            },
+            "answers": answers,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"db error: {e}")
+
+
+# =========================
+# Talk Topics 조회
+# =========================
+
+@router.get("/topics")
+def admin_topics_list(db: Session = Depends(get_db)):
+    """대화 주제 목록 조회"""
+    try:
+        rows = db.execute(
+            text("SELECT id, title, description FROM talk_topics ORDER BY id ASC")
+        ).mappings().all()
+
+        topics = [{
+            "id": int(r["id"]),
+            "title": r["title"],
+            "description": r["description"],
+        } for r in rows]
+
+        return {"topics": topics}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"db error: {e}")
+
+
+# =========================
+# 현재 Persona 조회
+# =========================
+
+@router.get("/persona")
+def admin_persona_get(db: Session = Depends(get_db)):
+    """현재 생성된 persona_prompt 및 values_summary 조회"""
+    try:
+        row = db.execute(
+            text("""
+                SELECT phase, persona_prompt, values_summary, formed_at, current_question
+                FROM psano_state
+                WHERE id = 1
+            """)
+        ).mappings().first()
+
+        if not row:
+            raise HTTPException(status_code=500, detail="psano_state(id=1) not found")
+
+        return {
+            "phase": row["phase"],
+            "persona_prompt": row["persona_prompt"],
+            "values_summary": row["values_summary"],
+            "formed_at": iso(row["formed_at"]),
+            "current_question": int(row["current_question"]) if row["current_question"] else None,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"db error: {e}")
+
+
+# =========================
+# Quick Test (자동 답변 제출)
+# =========================
+
+@router.post("/quick-test")
+def admin_quick_test(
+    db: Session = Depends(get_db),
+    visitor_name: str = Query("QuickTest", description="테스트 방문자 이름"),
+    answer_count: int = Query(5, ge=1, le=10, description="자동 제출할 답변 수"),
+):
+    """
+    Quick Test: 세션 시작 → 지정된 수의 답변 자동 제출 → 세션 종료
+    각 질문에 랜덤(A/B)으로 응답
+    """
+    import random
+
+    try:
+        # 1) psano_state에서 현재 질문 조회
+        st = db.execute(
+            text("SELECT current_question FROM psano_state WHERE id = 1")
+        ).mappings().first()
+
+        if not st:
+            raise HTTPException(status_code=500, detail="psano_state(id=1) not found")
+
+        start_question_id = int(st["current_question"])
+
+        # 2) 세션 생성
+        from utils import now_kst_naive
+        started_at = now_kst_naive()
+
+        result = db.execute(
+            text("""
+                INSERT INTO sessions (visitor_name, started_at, start_question_id)
+                VALUES (:name, :started_at, :start_qid)
+            """),
+            {"name": visitor_name, "started_at": started_at, "start_qid": start_question_id}
+        )
+        session_id = int(getattr(result, "lastrowid", 0) or 0)
+
+        if not session_id:
+            raise HTTPException(status_code=500, detail="failed to create session")
+
+        # 3) 답변 자동 제출
+        answers_submitted = []
+        current_qid = start_question_id
+
+        for i in range(answer_count):
+            # 질문 조회
+            q = db.execute(
+                text("""
+                    SELECT id, value_a_key, value_b_key, enabled
+                    FROM questions
+                    WHERE id >= :qid AND enabled = 1
+                    ORDER BY id ASC
+                    LIMIT 1
+                """),
+                {"qid": current_qid}
+            ).mappings().first()
+
+            if not q:
+                break  # 더 이상 질문이 없음
+
+            qid = int(q["id"])
+            choice = random.choice(["A", "B"])
+            chosen_value_key = q["value_a_key"] if choice == "A" else q["value_b_key"]
+
+            # 답변 저장
+            db.execute(
+                text("""
+                    INSERT INTO answers (session_id, question_id, choice, chosen_value_key)
+                    VALUES (:sid, :qid, :choice, :value_key)
+                """),
+                {"sid": session_id, "qid": qid, "choice": choice, "value_key": chosen_value_key}
+            )
+
+            answers_submitted.append({
+                "question_id": qid,
+                "choice": choice,
+                "chosen_value_key": chosen_value_key,
+            })
+
+            current_qid = qid + 1
+
+        # 4) psano_personality 업데이트
+        for ans in answers_submitted:
+            col = ans["chosen_value_key"]
+            if col:
+                db.execute(
+                    text(f"UPDATE psano_personality SET `{col}` = `{col}` + 1 WHERE id = 1"),
+                )
+
+        # 5) psano_state.current_question 업데이트
+        if answers_submitted:
+            next_q = db.execute(
+                text("""
+                    SELECT id FROM questions
+                    WHERE id > :last_qid AND enabled = 1
+                    ORDER BY id ASC
+                    LIMIT 1
+                """),
+                {"last_qid": answers_submitted[-1]["question_id"]}
+            ).mappings().first()
+
+            new_current_q = int(next_q["id"]) if next_q else 381
+            db.execute(
+                text("UPDATE psano_state SET current_question = :q WHERE id = 1"),
+                {"q": new_current_q}
+            )
+
+        # 6) 세션 종료
+        ended_at = now_kst_naive()
+        db.execute(
+            text("""
+                UPDATE sessions
+                SET ended_at = :ended_at, end_reason = 'completed'
+                WHERE id = :sid
+            """),
+            {"ended_at": ended_at, "sid": session_id}
+        )
+
+        db.commit()
+
+        return {
+            "ok": True,
+            "session_id": session_id,
+            "visitor_name": visitor_name,
+            "answers_count": len(answers_submitted),
+            "answers": answers_submitted,
+            "start_question_id": start_question_id,
+            "next_question_id": new_current_q if answers_submitted else start_question_id,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"quick test failed: {e}")

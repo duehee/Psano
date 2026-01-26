@@ -4,11 +4,23 @@
 from __future__ import annotations
 
 import json
+import time
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Any, Dict, Optional
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
+
+
+# ============================================================
+# 설정/프롬프트 캐시
+# ============================================================
+
+_config_cache: Dict[str, Any] = {}
+_config_cache_time: float = 0
+_prompt_cache: Dict[str, str] = {}
+_prompt_cache_time: float = 0
+CONFIG_CACHE_TTL = 60  # 초
 
 
 # ============================================================
@@ -94,3 +106,112 @@ def load_growth_stage(db: Session, answered_total: int):
             LIMIT 1
         """)
     ).mappings().first()
+
+
+# ============================================================
+# 설정 로더 (psano_config)
+# ============================================================
+
+def _load_all_configs(db: Session) -> Dict[str, Any]:
+    """DB에서 모든 설정을 로드하고 타입 변환"""
+    global _config_cache, _config_cache_time
+
+    if _config_cache and (time.time() - _config_cache_time < CONFIG_CACHE_TTL):
+        return _config_cache
+
+    try:
+        rows = db.execute(
+            text("SELECT config_key, config_value, value_type FROM psano_config")
+        ).mappings().all()
+    except Exception:
+        # 테이블이 없으면 빈 딕셔너리 반환
+        return {}
+
+    result = {}
+    for row in rows:
+        key = row.get("config_key")
+        value = row.get("config_value", "")
+        value_type = row.get("value_type", "str")
+
+        if value_type == "int":
+            result[key] = int(value)
+        elif value_type == "float":
+            result[key] = float(value)
+        elif value_type == "json":
+            try:
+                result[key] = json.loads(value)
+            except Exception:
+                result[key] = value
+        else:
+            result[key] = value
+
+    _config_cache = result
+    _config_cache_time = time.time()
+    return result
+
+
+def get_config(db: Session, key: str, default: Any = None) -> Any:
+    """단일 설정값 조회 (캐시 사용)"""
+    configs = _load_all_configs(db)
+    return configs.get(key, default)
+
+
+def get_configs(db: Session, keys: list[str]) -> Dict[str, Any]:
+    """여러 설정값 조회 (캐시 사용)"""
+    configs = _load_all_configs(db)
+    return {k: configs.get(k) for k in keys}
+
+
+# ============================================================
+# 프롬프트 로더 (psano_prompts)
+# ============================================================
+
+def _load_all_prompts(db: Session) -> Dict[str, str]:
+    """DB에서 모든 프롬프트 템플릿 로드"""
+    global _prompt_cache, _prompt_cache_time
+
+    if _prompt_cache and (time.time() - _prompt_cache_time < CONFIG_CACHE_TTL):
+        return _prompt_cache
+
+    try:
+        rows = db.execute(
+            text("SELECT prompt_key, prompt_template FROM psano_prompts")
+        ).mappings().all()
+    except Exception:
+        return {}
+
+    result = {row.get("prompt_key"): row.get("prompt_template", "") for row in rows}
+
+    _prompt_cache = result
+    _prompt_cache_time = time.time()
+    return result
+
+
+def get_prompt(db: Session, key: str, default: str = "") -> str:
+    """단일 프롬프트 템플릿 조회 (캐시 사용)"""
+    prompts = _load_all_prompts(db)
+    return prompts.get(key, default)
+
+
+# ============================================================
+# 캐시 초기화
+# ============================================================
+
+def clear_config_cache():
+    """설정 캐시 강제 초기화"""
+    global _config_cache, _config_cache_time
+    _config_cache = {}
+    _config_cache_time = 0
+
+
+def clear_prompt_cache():
+    """프롬프트 캐시 강제 초기화"""
+    global _prompt_cache, _prompt_cache_time
+    _prompt_cache = {}
+    _prompt_cache_time = 0
+
+
+def clear_all_cache():
+    """모든 캐시 초기화"""
+    clear_config_cache()
+    clear_prompt_cache()

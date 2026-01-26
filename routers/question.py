@@ -4,21 +4,27 @@ from sqlalchemy import text
 
 from database import get_db
 from schemas.question import QuestionResponse
+from utils import get_config
 
 router = APIRouter()
 
-SESSION_QUESTION_LIMIT = 5
-MAX_QUESTIONS = 380  # 기존 로직 유지
+# 하드코딩 fallback (DB 없을 때)
+_DEFAULT_SESSION_LIMIT = 5
+_DEFAULT_MAX_QUESTIONS = 380
 
 @router.get("/current", response_model=QuestionResponse)
 def get_current_question(
     session_id: int = Query(..., ge=1),
     db: Session = Depends(get_db),
 ):
-    # 0) 세션 유효성
+    # 설정 로드
+    session_limit = get_config(db, "session_question_limit", _DEFAULT_SESSION_LIMIT)
+    max_questions = get_config(db, "max_questions", _DEFAULT_MAX_QUESTIONS)
+
+    # 0) 세션 유효성 + start_question_id 조회
     ses = db.execute(
         text("""
-            SELECT id, ended_at
+            SELECT id, ended_at, start_question_id
             FROM sessions
             WHERE id = :sid
         """),
@@ -31,10 +37,12 @@ def get_current_question(
     if ses["ended_at"] is not None:
         raise HTTPException(status_code=409, detail="session already ended")
 
-    # 1) phase / current_question
+    start_question_id = int(ses.get("start_question_id") or 1)
+
+    # 1) phase 확인
     st = db.execute(
         text("""
-            SELECT phase, current_question
+            SELECT phase
             FROM psano_state
             WHERE id = 1
         """)
@@ -46,7 +54,7 @@ def get_current_question(
     if st["phase"] != "teach":
         raise HTTPException(status_code=409, detail="phase is not teach")
 
-    # 2) session_question_index 계산(답변 기준)
+    # 2) session_question_index 계산 (답변 기준)
     answered_cnt = db.execute(
         text("""
             SELECT COUNT(*) AS cnt
@@ -59,14 +67,16 @@ def get_current_question(
     answered_cnt = int(answered_cnt["cnt"]) if answered_cnt else 0
     session_question_index = answered_cnt + 1  # 1~5
 
-    if session_question_index > SESSION_QUESTION_LIMIT:
+    if session_question_index > session_limit:
         raise HTTPException(status_code=409, detail="session question limit reached")
 
-    qid = int(st["current_question"])
-    if qid > MAX_QUESTIONS:
+    # 3) 세션별 질문 ID 계산: start_question_id + 답변 수
+    qid = start_question_id + answered_cnt
+
+    if qid > max_questions:
         raise HTTPException(status_code=409, detail="teach phase already completed")
 
-    # 3) value_a_key/value_b_key까지 같이 조회 (여기가 핵심 수정)
+    # 4) 질문 조회
     q = db.execute(
         text("""
             SELECT id, axis_key, question_text, choice_a, choice_b, enabled, value_a_key, value_b_key
@@ -79,7 +89,7 @@ def get_current_question(
     if not q:
         raise HTTPException(status_code=404, detail=f"question not found: {qid}")
 
-    # disabled면 다음 enabled 스킵
+    # disabled면 다음 enabled 질문 찾기
     if not bool(q["enabled"]):
         next_q = db.execute(
             text("""
@@ -95,19 +105,9 @@ def get_current_question(
         if not next_q:
             raise HTTPException(status_code=409, detail="no enabled question available")
 
-        db.execute(
-            text("""
-                UPDATE psano_state
-                SET current_question = :new_qid
-                WHERE id = 1
-            """),
-            {"new_qid": int(next_q["id"])},
-        )
-        db.commit()
-
         q = next_q
 
-    # 4) 응답에 value 키도 내려주기
+    # 5) 응답
     return {
         "id": int(q["id"]),
         "axis_key": q["axis_key"],

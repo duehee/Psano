@@ -8,15 +8,14 @@ from sqlalchemy import text
 
 from database import get_db
 from schemas.persona import PersonaGenerateRequest, PersonaGenerateResponse
-from utils import now_kst_naive, iso
+from utils import now_kst_naive, iso, get_config, get_prompt
 from services.llm_service import client
 
 router = APIRouter()
 
-TOTAL_QUESTIONS = 380
-
-# 기획 기준: "각 반대쌍 문항 수"
-PAIR_QUESTION_COUNT = 76
+# 하드코딩 fallback (DB 없을 때)
+_DEFAULT_TOTAL_QUESTIONS = 380
+_DEFAULT_PAIR_QUESTION_COUNT = 76
 
 # 네 psano_personality 컬럼(스크린샷 기준)
 PAIRS: List[Dict[str, str]] = [
@@ -57,29 +56,40 @@ PAIRS: List[Dict[str, str]] = [
     },
 ]
 
-def _strength_word(diff_ratio: float) -> str:
-    # diff_ratio = (a-b)/PAIR_QUESTION_COUNT  ( -1.0 ~ +1.0 근처)
+def _strength_word(diff_ratio: float, thresholds: Dict[str, float], labels: Dict[str, str]) -> str:
+    """
+    diff_ratio = (a-b)/PAIR_QUESTION_COUNT  ( -1.0 ~ +1.0 근처)
+    thresholds: balanced, slight, moderate 임계값
+    labels: balanced, slight, moderate, strong 라벨
+    """
     x = abs(diff_ratio)
-    if x < 0.10:
-        return "균형"
-    if x < 0.25:
-        return "약간"
-    if x < 0.45:
-        return "꽤"
-    return "강하게"
+    if x < thresholds.get("balanced", 0.10):
+        return labels.get("balanced", "균형")
+    if x < thresholds.get("slight", 0.25):
+        return labels.get("slight", "약간")
+    if x < thresholds.get("moderate", 0.45):
+        return labels.get("moderate", "꽤")
+    return labels.get("strong", "강하게")
 
-def _lean_label(pair: Dict[str, str], a: int, b: int) -> str:
+def _lean_label(pair: Dict[str, str], a: int, b: int, pair_count: int, thresholds: Dict[str, float], labels: Dict[str, str]) -> str:
     diff = a - b
-    diff_ratio = diff / float(PAIR_QUESTION_COUNT)
-    strength = _strength_word(diff_ratio)
-    if strength == "균형":
-        return f"{pair['a_label']}↔{pair['b_label']} 균형"
+    diff_ratio = diff / float(pair_count)
+    strength = _strength_word(diff_ratio, thresholds, labels)
+    balanced_label = labels.get("balanced", "균형")
+    if strength == balanced_label:
+        return f"{pair['a_label']}↔{pair['b_label']} {balanced_label}"
     if diff > 0:
         return f"{strength} {pair['a_label']} 쪽"
     else:
         return f"{strength} {pair['b_label']} 쪽"
 
-def _build_values_summary(axis_scores: Dict[str, int]) -> Tuple[str, Dict[str, Any], List[str]]:
+def _build_values_summary(
+    axis_scores: Dict[str, int],
+    total_questions: int,
+    pair_count: int,
+    thresholds: Dict[str, float],
+    labels: Dict[str, str],
+) -> Tuple[str, Dict[str, Any], List[str]]:
     """
     returns: (values_summary_text, pair_insights_json, warnings)
     """
@@ -87,7 +97,7 @@ def _build_values_summary(axis_scores: Dict[str, int]) -> Tuple[str, Dict[str, A
     pair_insights: Dict[str, Any] = {}
 
     lines: List[str] = []
-    lines.append(f"- 총 문항: {TOTAL_QUESTIONS} (페어당 {PAIR_QUESTION_COUNT} 기준)")
+    lines.append(f"- 총 문항: {total_questions} (페어당 {pair_count} 기준)")
     lines.append("")
 
     # 페어별 요약
@@ -96,15 +106,15 @@ def _build_values_summary(axis_scores: Dict[str, int]) -> Tuple[str, Dict[str, A
         b = int(axis_scores.get(p["b_key"], 0))
         observed = a + b
 
-        if observed != PAIR_QUESTION_COUNT:
+        if observed != pair_count:
             # 현실 데이터가 76이 아닐 수 있으니 경고만 남김(기획 기준은 76로 계산)
-            warnings.append(f"{p['pair_key']}: observed_total={observed} (expected={PAIR_QUESTION_COUNT})")
+            warnings.append(f"{p['pair_key']}: observed_total={observed} (expected={pair_count})")
 
-        a_ratio = a / float(PAIR_QUESTION_COUNT)
-        b_ratio = b / float(PAIR_QUESTION_COUNT)
+        a_ratio = a / float(pair_count)
+        b_ratio = b / float(pair_count)
         diff = a - b
-        diff_ratio = diff / float(PAIR_QUESTION_COUNT)
-        lean = _lean_label(p, a, b)
+        diff_ratio = diff / float(pair_count)
+        lean = _lean_label(p, a, b, pair_count, thresholds, labels)
 
         pair_insights[p["pair_key"]] = {
             "a_key": p["a_key"],
@@ -119,24 +129,31 @@ def _build_values_summary(axis_scores: Dict[str, int]) -> Tuple[str, Dict[str, A
             "diff_ratio": round(diff_ratio, 4),
             "lean": lean,
             "observed_total": observed,
-            "expected_total": PAIR_QUESTION_COUNT,
+            "expected_total": pair_count,
         }
 
         lines.append(
-            f"- {p['a_label']}({a}/{PAIR_QUESTION_COUNT}, {a_ratio*100:.1f}%) vs "
-            f"{p['b_label']}({b}/{PAIR_QUESTION_COUNT}, {b_ratio*100:.1f}%) → {lean}"
+            f"- {p['a_label']}({a}/{pair_count}, {a_ratio*100:.1f}%) vs "
+            f"{p['b_label']}({b}/{pair_count}, {b_ratio*100:.1f}%) → {lean}"
         )
 
     return "\n".join(lines).strip(), pair_insights, warnings
 
-def _build_llm_prompt(values_summary: str, pair_insights: Dict[str, Any]) -> str:
+def _build_llm_prompt(db: Session, values_summary: str, pair_insights: Dict[str, Any]) -> str:
     """
-    LLM에게 '사노 persona_prompt'를 생성시키는 프롬프트(코드 내장).
-    결과는 psano_state.persona_prompt로 저장해서 talk에서 그대로 사용할 예정.
+    LLM에게 '사노 persona_prompt'를 생성시키는 프롬프트.
+    DB에서 템플릿을 로드하고, 없으면 하드코딩 fallback 사용.
     """
-    # "더 편향적으로" 만들고 싶다 했으니까:
-    # - diff_ratio가 큰 페어는 말투/관점/질문 습관에 강하게 반영
-    # - 균형인 페어는 중립적으로
+    # DB에서 프롬프트 템플릿 로드
+    template = get_prompt(db, "persona_prompt", "")
+
+    if template:
+        return template.format(
+            values_summary=values_summary,
+            pair_insights=pair_insights,
+        )
+
+    # fallback: 하드코딩 프롬프트
     return f"""
 너는 전시 작품의 대화 에이전트 설계자야.
 아래 '가치 축 결과'를 바탕으로, 작품 캐릭터 "사노"의 persona_prompt(시스템 프롬프트용 텍스트)를 만들어.
@@ -165,22 +182,34 @@ def _build_llm_prompt(values_summary: str, pair_insights: Dict[str, Any]) -> str
 2) VOICE: 말투/톤/문장 길이/리듬(짧고 또렷)
 3) VALUES: 결과 기반 성향을 "행동 규칙"으로 변환(편향 강할수록 더 명확히)
 4) CONDUCT: 대화 운영 규칙(되묻기/확인/한 문장+질문)
-5) SAFETY: 민감 주제 대응 규칙 (아래 내용을 반드시 포함)
-   - 자해/자살 언급 시: 즉시 위기 안내 제공 ("지금 위험하면 112/119에 연락해. 자살예방 109도 있어.") 후 대화 마무리
-   - 성적/음란 주제: "그 주제는 여기선 다루기 어려워"라고 하고 전시 관련 주제로 부드럽게 전환
-   - 혐오/차별 표현: "그런 표현은 함께 쓰기 어려워"라고 안내
-   - 개인정보(전화/주소/주민번호 등): 말하지 말라고 안내하고 느낌이나 생각으로 대신 표현하도록 유도
-   - 범죄/정치/종교 주제: 전시 관련 주제로 자연스럽게 전환 ("그 얘긴 잠깐 옆에 두고...")
-   - 폭력/불법 조장: 언급 금지
-6) EXAMPLES: 5개 정도(첫마디/되묻기/공감/전환/정리) + 민감 주제 전환 예시 1개
+5) SAFETY: 민감 주제 대응 규칙
+6) EXAMPLES: 5개 정도(첫마디/되묻기/공감/전환/정리)
 
 [중요]
 - 성향 반영은 "단정"이 아니라 "관점의 무게중심"으로 구현해.
 - 편향이 큰 축은 사노가 자주 그 방향 질문을 던지거나 단어를 선택하도록.
-- SAFETY 섹션의 대응 규칙은 사노의 "성격"으로 자연스럽게 녹아들도록 작성해.
 """.strip()
 
 def _generate_persona(db: Session, *, force: bool, model: str | None, allow_under_380: bool) -> PersonaGenerateResponse:
+    # 설정값 로드
+    total_questions = get_config(db, "max_questions", _DEFAULT_TOTAL_QUESTIONS)
+    pair_count = get_config(db, "pair_question_count", _DEFAULT_PAIR_QUESTION_COUNT)
+    default_model = get_config(db, "default_llm_model", "gpt-4o-mini")
+    persona_max_tokens = get_config(db, "persona_max_tokens", 1200)
+
+    # 강도 임계값 로드
+    thresholds = {
+        "balanced": get_config(db, "strength_threshold_balanced", 0.10),
+        "slight": get_config(db, "strength_threshold_slight", 0.25),
+        "moderate": get_config(db, "strength_threshold_moderate", 0.45),
+    }
+    labels = {
+        "balanced": get_config(db, "strength_label_balanced", "균형"),
+        "slight": get_config(db, "strength_label_slight", "약간"),
+        "moderate": get_config(db, "strength_label_moderate", "꽤"),
+        "strong": get_config(db, "strength_label_strong", "강하게"),
+    }
+
     try:
         st = db.execute(
             text("""
@@ -205,14 +234,14 @@ def _generate_persona(db: Session, *, force: bool, model: str | None, allow_unde
 
     current_q = int(st.get("current_question") or 1)
     answered_total = max(0, current_q - 1)
-    if answered_total > TOTAL_QUESTIONS:
-        answered_total = TOTAL_QUESTIONS
+    if answered_total > total_questions:
+        answered_total = total_questions
 
     # 실전 /persona/generate 에서는 380 미만이면 막음(관리자 테스트는 allow_under_380=True 가능)
-    if (answered_total < TOTAL_QUESTIONS) and (not allow_under_380) and (not force):
+    if (answered_total < total_questions) and (not allow_under_380) and (not force):
         raise HTTPException(
             status_code=409,
-            detail=f"not ready: answered_total={answered_total} (need {TOTAL_QUESTIONS})"
+            detail=f"not ready: answered_total={answered_total} (need {total_questions})"
         )
 
     # idempotent: 기존 persona_prompt가 있고 force 아니면 그대로 반환
@@ -227,7 +256,9 @@ def _generate_persona(db: Session, *, force: bool, model: str | None, allow_unde
             "self_direction","conformity","stimulation","security","hedonism",
             "tradition","achievement","benevolence","power","universalism"
         ]}
-        values_summary, pair_insights, _warnings = _build_values_summary(axis_scores)
+        values_summary, pair_insights, _warnings = _build_values_summary(
+            axis_scores, total_questions, pair_count, thresholds, labels
+        )
 
         return PersonaGenerateResponse(
             ok=True,
@@ -252,34 +283,37 @@ def _generate_persona(db: Session, *, force: bool, model: str | None, allow_unde
     ]}
 
     # 2) values_summary + pair_insights 만들기
-    values_summary, pair_insights, warnings = _build_values_summary(axis_scores)
+    values_summary, pair_insights, warnings = _build_values_summary(
+        axis_scores, total_questions, pair_count, thresholds, labels
+    )
 
-    # 3) LLM 프롬프트 구성(코드 내장)
-    llm_prompt = _build_llm_prompt(values_summary, pair_insights)
+    # 3) LLM 프롬프트 구성 (DB에서 로드)
+    llm_prompt = _build_llm_prompt(db, values_summary, pair_insights)
 
     # 4) LLM 호출(가장 성능 좋은 모델 사용)
-    use_model = model or "gpt-4o-mini"
+    use_model = model or default_model
 
     try:
         resp = client.chat.completions.create(
             model=use_model,
             messages=[{"role": "user", "content": llm_prompt}],
-            max_tokens=1200,  # persona_prompt는 좀 길어도 괜찮
+            max_tokens=persona_max_tokens,
         )
         persona_prompt = (resp.choices[0].message.content or "").strip()
         if not persona_prompt:
             raise RuntimeError("empty output")
     except Exception as e:
-        # persona 생성은 중요하다고 했지만, 그래도 최소 fallback은 있어야 함
-        # (완전 실패하면 전시가 막히니까)
-        persona_prompt = (
-            "ROLE: 사노(전시 대화 캐릭터)\n"
-            "VOICE: 짧고 또렷, 질문으로 이어가기\n"
-            "VALUES: 결과 기반으로 특정 축에 무게 중심 두기\n"
-            "CONDUCT: 한 문장 + 질문 1개\n"
-            "SAFETY: 혐오/폭력/노골적 성적/불법/개인정보 회피\n"
-            "EXAMPLES: ...\n"
-        )
+        # persona 생성 실패 시 DB fallback 또는 하드코딩 fallback
+        persona_prompt = get_prompt(db, "persona_fallback", "")
+        if not persona_prompt:
+            persona_prompt = (
+                "ROLE: 사노(전시 대화 캐릭터)\n"
+                "VOICE: 짧고 또렷, 질문으로 이어가기\n"
+                "VALUES: 결과 기반으로 특정 축에 무게 중심 두기\n"
+                "CONDUCT: 한 문장 + 질문 1개\n"
+                "SAFETY: 혐오/폭력/노골적 성적/불법/개인정보 회피\n"
+                "EXAMPLES: ...\n"
+            )
 
     # 5) DB 저장 + phase 전환
     formed_at = now_kst_naive()

@@ -6,12 +6,14 @@ from sqlalchemy import text
 from database import get_db
 from schemas.answer import AnswerRequest, AnswerResponse
 from services.llm_service import call_llm
-from utils import load_growth_stage
+from utils import load_growth_stage, get_config, get_prompt
 
 router = APIRouter()
 
-SESSION_QUESTION_LIMIT = 5
-MAX_QUESTIONS = 380
+# 하드코딩 fallback (DB 없을 때)
+_DEFAULT_SESSION_LIMIT = 5
+_DEFAULT_FALLBACK_REACTIONS = ["흠, 그렇구나.", "알겠어.", "오케이."]
+_DEFAULT_FALLBACK_LAST = "좋아. 오늘은 여기까지 해보자."
 
 ALLOWED_VALUE_KEYS = {
     "self_direction",
@@ -26,15 +28,9 @@ ALLOWED_VALUE_KEYS = {
     "universalism",
 }
 
-FALLBACK_REACTIONS = [
-    "흠, 그렇구나.",
-    "알겠어.",
-    "오케이.",
-]
 
-
-def _build_style_guide(stage) -> str:
-    """성장단계에 따른 스타일 가이드 생성"""
+def _build_style_guide(db: Session, stage) -> str:
+    """성장단계에 따른 스타일 가이드 생성 (임계값 DB에서 로드)"""
     if not stage:
         return ""
 
@@ -42,16 +38,22 @@ def _build_style_guide(stage) -> str:
     certainty = float(stage.get("certainty") or 0.4)
     empathy = float(stage.get("empathy_level") or 0.6)
 
+    # 임계값 DB에서 로드
+    metaphor_low = get_config(db, "style_metaphor_low", 0.25)
+    metaphor_high = get_config(db, "style_metaphor_high", 0.45)
+    certainty_low = get_config(db, "style_certainty_low", 0.45)
+    empathy_high = get_config(db, "style_empathy_high", 0.70)
+
     guides = []
-    if metaphor <= 0.25:
+    if metaphor <= metaphor_low:
         guides.append("은유 없이 직접적으로")
-    elif metaphor >= 0.45:
+    elif metaphor >= metaphor_high:
         guides.append("은유적으로")
 
-    if certainty <= 0.45:
+    if certainty <= certainty_low:
         guides.append("조심스럽게")
 
-    if empathy >= 0.7:
+    if empathy >= empathy_high:
         guides.append("공감하며")
 
     return ", ".join(guides) if guides else "담백하게"
@@ -66,15 +68,41 @@ def _reaction_text_gpt(
     answered_total: int,
 ) -> str:
     """유저 답변에 GPT가 성장단계 스타일로 짧게 반응"""
-    is_last = session_question_index >= SESSION_QUESTION_LIMIT
+    # 설정 로드
+    session_limit = get_config(db, "session_question_limit", _DEFAULT_SESSION_LIMIT)
+    fallback_reactions = get_config(db, "fallback_reactions", _DEFAULT_FALLBACK_REACTIONS)
+    fallback_last = get_config(db, "fallback_reaction_last", _DEFAULT_FALLBACK_LAST)
+    reaction_max_tokens = get_config(db, "reaction_max_tokens", 50)
+
+    is_last = session_question_index >= session_limit
 
     # 성장단계 로드
     stage = load_growth_stage(db, answered_total) or {}
     stage_name = stage.get("stage_name_kr") or "태동기"
-    style_guide = _build_style_guide(stage)
+    style_guide = _build_style_guide(db, stage)
     notes = (stage.get("notes") or "").strip()
 
-    prompt = f"""너는 전시 작품 '사노'야. 관람객이 질문에 답했어.
+    # 프롬프트 템플릿 로드 (DB에서)
+    prompt_template = get_prompt(db, "reaction_prompt", "")
+
+    if prompt_template:
+        # DB 템플릿 사용
+        notes_line = f"[말투 예시: {notes}]" if notes else ""
+        last_instruction = '마지막이니까 "오늘은 여기까지" 느낌으로' if is_last else "다음으로 넘어가는 느낌"
+
+        prompt = prompt_template.format(
+            stage_name=stage_name,
+            style_guide=style_guide,
+            notes_line=notes_line,
+            question_text=question_text,
+            choice=choice,
+            session_question_index=session_question_index,
+            session_question_limit=session_limit,
+            last_instruction=last_instruction,
+        )
+    else:
+        # fallback: 하드코딩 프롬프트
+        prompt = f"""너는 전시 작품 '사노'야. 관람객이 질문에 답했어.
 
 [성장단계: {stage_name}]
 [스타일: {style_guide}]
@@ -82,7 +110,7 @@ def _reaction_text_gpt(
 
 질문: {question_text}
 선택: {choice}
-진행: {session_question_index}/{SESSION_QUESTION_LIMIT}
+진행: {session_question_index}/{session_limit}
 
 규칙:
 - 한국어, 30자 이내
@@ -95,14 +123,14 @@ def _reaction_text_gpt(
 
     # fallback 텍스트 결정
     if is_last:
-        fallback_text = "좋아. 오늘은 여기까지 해보자."
+        fallback_text = fallback_last
     else:
-        fallback_text = FALLBACK_REACTIONS[int(time.time()) % len(FALLBACK_REACTIONS)]
+        fallback_text = fallback_reactions[int(time.time()) % len(fallback_reactions)]
 
     # LLM 호출 (공통 래퍼: timeout 8초, retry 2회)
     result = call_llm(
         prompt,
-        max_tokens=50,
+        max_tokens=reaction_max_tokens,
         fallback_text=fallback_text,
     )
 
@@ -111,11 +139,15 @@ def _reaction_text_gpt(
     else:
         return result.content
 
+
 @router.post("", response_model=AnswerResponse)
 def post_answer(req: AnswerRequest, db: Session = Depends(get_db)):
     sid = int(req.session_id)
     qid = int(req.question_id)
     choice = req.choice
+
+    # 설정 로드
+    session_limit = get_config(db, "session_question_limit", _DEFAULT_SESSION_LIMIT)
 
     # 0) 세션 존재/종료 체크 + start_question_id 조회
     ses = db.execute(
@@ -201,7 +233,7 @@ def post_answer(req: AnswerRequest, db: Session = Depends(get_db)):
 
         # 5) session_question_index 계산 (방금 저장했으니 +1)
         session_question_index = answered_before + 1
-        session_should_end = (session_question_index >= SESSION_QUESTION_LIMIT)
+        session_should_end = (session_question_index >= session_limit)
 
         # 6) 전역 answered_total 계산 (GPT 반응 성장단계용)
         total_row = db.execute(
@@ -219,6 +251,7 @@ def post_answer(req: AnswerRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"db error: {e}")
 
     # next_question: 세션 종료 전이면 다음 질문 번호
+    # (참고: psano_state.current_question은 session_service.py에서 세션 종료 시 일괄 업데이트)
     next_question = None
     if not session_should_end:
         # 다음 enabled 질문 찾기
@@ -234,16 +267,6 @@ def post_answer(req: AnswerRequest, db: Session = Depends(get_db)):
         ).mappings().first()
         if next_q:
             next_question = int(next_q["id"])
-            # psano_state.current_question 업데이트
-            db.execute(
-                text("""
-                    UPDATE psano_state
-                    SET current_question = :next_q
-                    WHERE id = 1
-                """),
-                {"next_q": next_question}
-            )
-            db.commit()
 
     # GPT 반응 생성 (성장단계 스타일 반영)
     question_text = q.get("question_text") or ""
