@@ -63,7 +63,7 @@ HTML = r"""
       flex: 1;
       margin-left: 280px;
       padding: 24px;
-      max-width: 900px;
+      max-width: 1200px;
     }
 
     /* Logo */
@@ -281,8 +281,30 @@ HTML = r"""
       font-family: var(--mono);
       font-size: 12px;
       line-height: 1.6;
+      max-height: 400px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    /* Scrollable content box */
+    .scroll-box {
       max-height: 300px;
       overflow-y: auto;
+      padding: 12px;
+      background: var(--secondary);
+      border-radius: var(--radius-sm);
+    }
+
+    .scroll-box-dark {
+      max-height: 350px;
+      overflow-y: auto;
+      padding: 16px;
+      background: #1e293b;
+      color: #e2e8f0;
+      border-radius: var(--radius-sm);
+      font-family: var(--mono);
+      font-size: 12px;
       white-space: pre-wrap;
       word-break: break-word;
     }
@@ -845,6 +867,14 @@ HTML = r"""
                 <select id="topicSelect" style="flex: 1;">
                   <option value="1">Topic 1</option>
                 </select>
+                <select id="talkModel" style="flex: 0; min-width: 180px;">
+                  <option value="gpt-4o-mini">gpt-4o-mini (빠름)</option>
+                  <option value="gpt-5.2">gpt-5.2 (최신 주력)</option>
+                  <option value="gpt-5">gpt-5 (고품질)</option>
+                  <option value="gpt-5-mini">gpt-5-mini (빠름/저렴)</option>
+                  <option value="gpt-4.1">gpt-4.1 (안정/정확)</option>
+                  <option value="gpt-4o">gpt-4o (범용)</option>
+                </select>
                 <button class="btn btn-primary" onclick="talkStart()">Start Talk</button>
               </div>
               <div class="chat-messages" id="chatMessages">
@@ -964,17 +994,17 @@ HTML = r"""
               <div class="form-group" style="flex: 2;">
                 <label class="form-label">Model</label>
                 <select id="personaModel">
-                  <option value="gpt-4o-mini">gpt-4o-mini (Fast, Cheap)</option>
-                  <option value="gpt-4o">gpt-4o (Balanced)</option>
-                  <option value="gpt-4-turbo">gpt-4-turbo (High Quality)</option>
-                  <option value="gpt-3.5-turbo">gpt-3.5-turbo (Legacy)</option>
-                  <option value="o1-mini">o1-mini (Reasoning)</option>
-                  <option value="o1-preview">o1-preview (Advanced Reasoning)</option>
+                  <option value="gpt-4o-mini">gpt-4o-mini (빠름)</option>
+                  <option value="gpt-5.2">gpt-5.2 (최신 주력)</option>
+                  <option value="gpt-5">gpt-5 (고품질)</option>
+                  <option value="gpt-5-mini">gpt-5-mini (빠름/저렴)</option>
+                  <option value="gpt-4.1">gpt-4.1 (안정/정확)</option>
+                  <option value="gpt-4o">gpt-4o (범용)</option>
                 </select>
               </div>
               <div class="form-group" style="flex: 1;">
                 <label class="form-label">Max Tokens</label>
-                <input type="number" id="personaMaxTokens" placeholder="1200" />
+                <input type="number" id="personaMaxTokens" placeholder="3000" />
               </div>
               <div class="form-group" style="flex: 0;">
                 <label class="form-label">&nbsp;</label>
@@ -1054,7 +1084,7 @@ HTML = r"""
             </div>
           </div>
           <div class="card-body">
-            <div id="admSessionsBox" style="overflow-x: auto;">
+            <div id="admSessionsBox" style="overflow: auto; max-height: 300px;">
               <div style="color: var(--muted); font-size: 13px;">Click Load to fetch sessions</div>
             </div>
           </div>
@@ -1141,9 +1171,9 @@ HTML = r"""
             <div id="personaInfoBox" style="margin-bottom: 12px; font-size: 13px; color: var(--muted);">Click Load to view current persona</div>
             <div id="personaPromptBox" style="display: none;">
               <div class="form-label">Values Summary</div>
-              <div id="personaValuesSummary" style="padding: 12px; background: var(--secondary); border-radius: 8px; font-size: 12px; margin-bottom: 12px; white-space: pre-wrap; max-height: 150px; overflow-y: auto;"></div>
+              <div id="personaValuesSummary" class="scroll-box" style="font-size: 12px; margin-bottom: 12px; white-space: pre-wrap; max-height: 200px;"></div>
               <div class="form-label">Persona Prompt</div>
-              <div id="personaPromptText" style="padding: 12px; background: #1e293b; color: #e2e8f0; border-radius: 8px; font-size: 12px; font-family: var(--mono); white-space: pre-wrap; max-height: 300px; overflow-y: auto;"></div>
+              <div id="personaPromptText" class="scroll-box-dark"></div>
             </div>
           </div>
         </div>
@@ -1160,7 +1190,7 @@ HTML = r"""
             </div>
           </div>
           <div class="card-body">
-            <div id="questionsBox" style="overflow-x: auto; max-height: 400px;">
+            <div id="questionsBox" style="overflow: auto; max-height: 350px;">
               <div style="color: var(--muted); font-size: 13px;">Click Load to fetch questions</div>
             </div>
           </div>
@@ -1173,7 +1203,7 @@ HTML = r"""
             <button class="btn btn-sm btn-secondary" onclick="loadGrowthStages()">Load</button>
           </div>
           <div class="card-body">
-            <div id="growthStagesBox" style="overflow-x: auto;">
+            <div id="growthStagesBox" style="overflow: auto; max-height: 300px;">
               <div style="color: var(--muted); font-size: 13px;">Click Load to fetch growth stages</div>
             </div>
           </div>
@@ -1186,7 +1216,7 @@ HTML = r"""
             <button class="btn btn-sm btn-secondary" onclick="loadAdminTopics()">Load</button>
           </div>
           <div class="card-body">
-            <div id="topicsBox" style="overflow-x: auto;">
+            <div id="topicsBox" style="overflow: auto; max-height: 250px;">
               <div style="color: var(--muted); font-size: 13px;">Click Load to fetch topics</div>
             </div>
           </div>
@@ -1476,11 +1506,12 @@ HTML = r"""
       return log('No session');
     }
     const tid = parseInt(document.getElementById('topicSelect').value);
+    const model = document.getElementById('talkModel').value;
     showSpinner(true);
     try {
       const data = await fetchJson('/talk/start', {
         method: 'POST',
-        body: JSON.stringify({ session_id: sessionId, topic_id: tid })
+        body: JSON.stringify({ session_id: sessionId, topic_id: tid, model: model })
       });
       activeTopicId = tid;
       document.getElementById('chatMessages').innerHTML = '';
@@ -1503,6 +1534,7 @@ HTML = r"""
     const text = input.value.trim();
     if (!text || !sessionId || !activeTopicId) return;
 
+    const model = document.getElementById('talkModel').value;
     addChatMessage('user', text);
     input.value = '';
     const typing = addChatMessage('assistant', '...');
@@ -1510,7 +1542,7 @@ HTML = r"""
     try {
       const data = await fetchJson('/talk/turn', {
         method: 'POST',
-        body: JSON.stringify({ session_id: sessionId, topic_id: activeTopicId, user_text: text })
+        body: JSON.stringify({ session_id: sessionId, topic_id: activeTopicId, user_text: text, model: model })
       });
       typing.textContent = data.ui_text || data.assistant_text || '';
       log({ endpoint: '/talk/turn', data });
@@ -1691,7 +1723,14 @@ HTML = r"""
     try {
       const data = await fetchJson('/persona/generate', { method: 'POST', body: JSON.stringify(body) });
       log({ endpoint: '/persona/generate', data });
-      toast('Persona generated successfully', 'success');
+
+      if (data.used_fallback) {
+        toast(`LLM 호출 실패 - fallback 사용됨: ${data.llm_error || 'unknown error'}`, 'error', 8000);
+      } else if (data.reused) {
+        toast('기존 persona 재사용됨 (force로 재생성 가능)', 'info');
+      } else {
+        toast('Persona generated successfully', 'success');
+      }
       await refreshState();
     } catch (e) {
       toast(`Persona generation failed: ${e.message}`, 'error');
@@ -2188,9 +2227,17 @@ HTML = r"""
         <h4>💬 Talk (대화)</h4>
         <p>380문항 형성 완료 후 사노와 자유 대화를 나눌 수 있습니다.</p>
         <ul>
-          <li><strong>Load Topics</strong>: 대화 주제 목록 불러오기</li>
-          <li><strong>Start Talk</strong>: 선택한 주제로 대화 시작</li>
-          <li><strong>Nudge</strong>: 사용자 반응 없을 때 사노가 툭 던지는 한마디</li>
+          <li><strong>Topic 선택</strong>: 대화 주제 선택 (Load Topics로 목록 불러오기)</li>
+          <li><strong>Model 선택</strong>: 대화에 사용할 LLM 모델 선택
+            <ul style="margin-top:4px; font-size:12px; color:var(--muted);">
+              <li>gpt-4o-mini: 빠름, 저렴</li>
+              <li>gpt-4o: 균형 잡힌 성능</li>
+              <li>gpt-4.5-preview: 최신 고성능</li>
+              <li>o1/o3-mini: 추론 특화 모델</li>
+            </ul>
+          </li>
+          <li><strong>Start Talk</strong>: 선택한 주제와 모델로 대화 시작</li>
+          <li><strong>Nudge (재촉)</strong>: 사용자 반응 없을 때 사노가 툭 던지는 한마디</li>
           <li><strong>End Talk</strong>: 대화 종료</li>
         </ul>
       </div>
@@ -2200,6 +2247,7 @@ HTML = r"""
           <li>Talk은 phase가 'talk'일 때만 시작 가능</li>
           <li>Nudge는 Talk이 활성화된 상태에서만 동작</li>
           <li>정책 규칙(자해/개인정보 등)에 의해 응답이 필터링될 수 있음</li>
+          <li>선택한 모델은 대화 시작과 턴마다 적용됩니다</li>
         </ul>
       </div>
     `,
@@ -2220,9 +2268,54 @@ HTML = r"""
         <h4>🎭 Persona Generate</h4>
         <p>380문항 완료 후 LLM으로 사노의 persona_prompt 생성</p>
         <ul>
-          <li><strong>Model</strong>: 사용할 GPT 모델 선택</li>
+          <li><strong>Model</strong>: 사용할 GPT 모델 선택
+            <ul style="margin-top:4px; font-size:12px; color:var(--muted);">
+              <li>gpt-4o-mini (빠름, 저렴) - 기본값</li>
+              <li>gpt-4o (균형)</li>
+              <li>gpt-4.5-preview (최신 고성능)</li>
+              <li>o1, o3-mini (추론 특화)</li>
+            </ul>
+          </li>
+          <li><strong>Max Tokens</strong>: 생성할 페르소나 최대 토큰 (기본 3000)</li>
           <li><strong>force</strong>: 기존 persona가 있어도 재생성</li>
         </ul>
+        <p style="color: var(--muted); font-size: 12px;">* LLM 호출 실패 시 fallback 페르소나가 적용됩니다.</p>
+      </div>
+      <div class="help-section">
+        <h4>⚡ Quick Test</h4>
+        <p>빠른 테스트를 위한 자동화 기능</p>
+        <ul>
+          <li>세션 생성 → 지정 개수만큼 랜덤 답변 → 세션 종료</li>
+          <li>한 번에 여러 문항 테스트 가능</li>
+        </ul>
+      </div>
+      <div class="help-section">
+        <h4>🎭 Current Persona</h4>
+        <p>현재 저장된 사노의 페르소나 프롬프트 확인</p>
+        <ul>
+          <li>values_summary와 persona_prompt 표시</li>
+          <li>스크롤로 전체 내용 확인 가능</li>
+        </ul>
+      </div>
+      <div class="help-section">
+        <h4>📋 Questions</h4>
+        <p>DB에 저장된 A/B 질문 목록 확인 및 관리</p>
+        <ul>
+          <li>질문 활성화/비활성화 토글</li>
+          <li>value_a, value_b 확인</li>
+        </ul>
+      </div>
+      <div class="help-section">
+        <h4>🌱 Growth Stages</h4>
+        <p>사노의 성장 단계별 설정 확인</p>
+        <ul>
+          <li>6단계 성장 (씨앗 → 완성)</li>
+          <li>각 단계별 스타일, 인사말, 혼잣말 프롬프트 확인</li>
+        </ul>
+      </div>
+      <div class="help-section">
+        <h4>💬 Talk Topics</h4>
+        <p>대화에 사용되는 주제 목록 확인</p>
       </div>
       <div class="help-section">
         <h4>📝 Config / Prompts</h4>

@@ -15,3 +15,5 @@ class PersonaGenerateResponse(BaseModel):
     values_summary: str
     persona_prompt: str
     reused: bool  # 기존 prompt 재사용 여부
+    llm_error: Optional[str] = None  # LLM 호출 실패 시 에러 메시지
+    used_fallback: bool = False  # fallback 사용 여부
