@@ -1,10 +1,17 @@
 from dotenv import load_dotenv
+
+from logging_conf import setup_logging
+from middleware.access_log import access_log_middleware
+
 load_dotenv()
 
 from fastapi import FastAPI
 from routers import health, session, question, answer, state, talk, ui, admin, persona, monologue, test, idle
 
+setup_logging()
 app = FastAPI(title="Psano Backend", version="0.1.0")
+
+app.middleware("http")(access_log_middleware)
 
 app.include_router(health.router, tags=["health"])
 app.include_router(session.router, prefix="/session", tags=["session"])

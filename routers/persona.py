@@ -8,8 +8,8 @@ from sqlalchemy import text
 
 from database import get_db
 from schemas.persona import PersonaGenerateRequest, PersonaGenerateResponse
-from utils import now_kst_naive, iso, get_config, get_prompt
-from services.llm_service import client
+from util.utils import now_kst_naive, iso, get_config, get_prompt
+from services.llm_service import call_llm
 
 router = APIRouter()
 
@@ -343,25 +343,29 @@ def _generate_persona(db: Session, *, force: bool, model: str | None, allow_unde
     # 3) LLM 프롬프트 구성 (DB에서 로드)
     llm_prompt = _build_llm_prompt(db, values_summary, pair_insights)
 
-    # 4) LLM 호출(가장 성능 좋은 모델 사용)
+    # 4) LLM 호출 (call_llm 공통 래퍼 사용 - talk.py와 동일)
     use_model = model or default_model
     llm_error = None
 
-    try:
-        resp = client.chat.completions.create(
-            model=use_model,
-            messages=[{"role": "user", "content": llm_prompt}],
-            max_tokens=persona_max_tokens,
-            timeout=90,  # persona 생성은 긴 응답이 필요하므로 timeout 늘림
-        )
-        persona_prompt = (resp.choices[0].message.content or "").strip()
-        if not persona_prompt:
-            raise RuntimeError("empty output from LLM")
-    except Exception as e:
-        llm_error = str(e)
-        print(f"[PERSONA] LLM call failed: {llm_error}")  # 콘솔 로그
+    # DB fallback 또는 하드코딩 fallback 텍스트 미리 로드
+    fallback_persona = get_prompt(db, "persona_fallback", "")
 
-        # persona 생성 실패 시 DB fallback 또는 하드코딩 fallback
+    result = call_llm(
+        llm_prompt,
+        model=use_model,
+        max_tokens=persona_max_tokens,
+        fallback_text=fallback_persona,
+    )
+
+    if result.success:
+        persona_prompt = result.content
+    else:
+        llm_error = result.fallback_code
+        print(f"[PERSONA] LLM call failed: {llm_error}")
+        persona_prompt = result.content  # fallback_text가 들어있음
+
+    # fallback_text도 비어있으면 하드코딩 fallback 사용
+    if not persona_prompt:
         persona_prompt = get_prompt(db, "persona_fallback", "")
         if not persona_prompt:
             persona_prompt = """## 1. IDENTITY (정체성)

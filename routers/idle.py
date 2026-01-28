@@ -1,18 +1,47 @@
 """
-Idle 상태에서 클릭 시 성장단계별 인사말 반환 API
+Idle 상태 API
+- 성장단계별 인사말 반환
+- 혼잣말 랜덤 조회
 """
+from __future__ import annotations
+
+import random
+
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 from database import get_db
-from utils import load_growth_stage
 
 router = APIRouter()
 
 # 하드코딩 fallback (DB에 데이터 없을 때)
 _DEFAULT_GREETING = "어… 누구야…?\n나는 사노라고 해.\n내가 무엇인지, 어떤 존재인지도 잘 모르겠어.\n그래서… 조금 물어봐도 될까?"
 
+# 5개 가치축 내 대립쌍 (각 쌍에서 높은 쪽 선택)
+AXIS_PAIRS = [
+    ("self_direction", "conformity"),      # My way
+    ("stimulation", "security"),           # Newness
+    ("hedonism", "tradition"),             # This moment
+    ("achievement", "benevolence"),        # growth
+    ("power", "universalism"),             # together
+]
+
+
+# =========================
+# 스키마
+# =========================
+
+class IdleRandomResponse(BaseModel):
+    id: int
+    axis_key: str
+    text: str
+
+
+# =========================
+# 성장단계별 인사말
+# =========================
 
 @router.get("/greeting")
 def get_idle_greeting(db: Session = Depends(get_db)):
@@ -70,3 +99,125 @@ def get_idle_greeting(db: Session = Depends(get_db)):
         "greeting": greeting,
         "answered_total": answered_total,
     }
+
+
+# =========================
+# 랜덤 혼잣말 조회 (가치축 기반)
+# =========================
+
+def _get_preferred_values(db: Session) -> list[str]:
+    """
+    psano_personality에서 5개 가치축 쌍을 비교하고,
+    각 쌍에서 더 높은 점수의 value를 반환 (총 5개)
+    """
+    row = db.execute(
+        text("""
+            SELECT self_direction, conformity, stimulation, security,
+                   hedonism, tradition, achievement, benevolence,
+                   power, universalism
+            FROM psano_personality
+            WHERE id = 1
+        """)
+    ).mappings().first()
+
+    if not row:
+        # personality 데이터 없으면 각 쌍의 첫번째 값 반환
+        return [pair[0] for pair in AXIS_PAIRS]
+
+    # 각 쌍에서 높은 쪽 선택
+    preferred = []
+    for val_a, val_b in AXIS_PAIRS:
+        score_a = int(row.get(val_a) or 0)
+        score_b = int(row.get(val_b) or 0)
+
+        if score_a >= score_b:
+            preferred.append(val_a)
+        else:
+            preferred.append(val_b)
+
+    return preferred
+
+
+@router.get("/random", response_model=IdleRandomResponse)
+def idle_random(db: Session = Depends(get_db)):
+    """
+    GET /idle/random
+    5개 가치축 각각에서 선호하는 value의 혼잣말 중 랜덤으로 1개 반환
+    """
+    try:
+        # 1) 각 가치축에서 선호하는 value 조회 (5개)
+        preferred_values = _get_preferred_values(db)
+
+        # 2) 그 중 하나를 랜덤 선택
+        selected_value = random.choice(preferred_values)
+
+        # 3) 해당 value의 혼잣말 조회
+        rows = db.execute(
+            text("""
+                SELECT id, axis_key, question_text, value
+                FROM psano_idle
+                WHERE enable = 1 AND value = :val
+            """),
+            {"val": selected_value}
+        ).mappings().all()
+
+        # 4) 해당 value에 혼잣말이 없으면 전체에서 선택
+        if not rows:
+            rows = db.execute(
+                text("""
+                    SELECT id, axis_key, question_text, value
+                    FROM psano_idle
+                    WHERE enable = 1
+                """)
+            ).mappings().all()
+
+        if not rows:
+            raise HTTPException(status_code=404, detail="No active idle monologues found")
+
+        selected = random.choice(list(rows))
+
+        return IdleRandomResponse(
+            id=int(selected["id"]),
+            axis_key=selected["axis_key"],
+            text=selected["question_text"],
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"db error: {e}")
+
+
+# =========================
+# 단건 조회 (by ID)
+# =========================
+
+@router.get("/monologue/{idle_id}", response_model=IdleRandomResponse)
+def idle_get(idle_id: int, db: Session = Depends(get_db)):
+    """
+    GET /idle/monologue/{idle_id}
+    특정 ID의 혼잣말 조회
+    """
+    try:
+        row = db.execute(
+            text("""
+                SELECT id, axis_key, question_text
+                FROM psano_idle
+                WHERE id = :id AND enable = 1
+            """),
+            {"id": idle_id}
+        ).mappings().first()
+
+        if not row:
+            raise HTTPException(status_code=404, detail=f"Idle monologue not found: {idle_id}")
+
+        return IdleRandomResponse(
+            id=int(row["id"]),
+            axis_key=row["axis_key"],
+            text=row["question_text"],
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"db error: {e}")

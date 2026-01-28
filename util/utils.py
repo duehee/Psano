@@ -1,12 +1,15 @@
+# app/utils/common.py
+from __future__ import annotations
+
 """
 공통 유틸리티 함수 모음
 """
-from __future__ import annotations
 
 import json
 import time
+import logging
 from datetime import datetime, timedelta
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -21,6 +24,57 @@ _config_cache_time: float = 0
 _prompt_cache: Dict[str, str] = {}
 _prompt_cache_time: float = 0
 CONFIG_CACHE_TTL = 60  # 초
+
+
+# ============================================================
+# ✅ LLM RAW 로깅 유틸
+# ============================================================
+
+_llm_raw_logger = logging.getLogger("psano.llm_raw")
+
+
+def _to_pretty(obj: Any) -> str:
+    """
+    OpenAI 응답/요청 객체를 보기 좋게 문자열로 변환.
+    - pydantic model_dump() 있으면 그걸 우선
+    - dict/list면 json pretty
+    - 나머지는 str()
+    """
+    if obj is None:
+        return "null"
+
+    if hasattr(obj, "model_dump"):
+        try:
+            return json.dumps(obj.model_dump(), ensure_ascii=False, indent=2, default=str)
+        except Exception:
+            pass
+
+    if isinstance(obj, (dict, list)):
+        try:
+            return json.dumps(obj, ensure_ascii=False, indent=2, default=str)
+        except Exception:
+            return str(obj)
+
+    return str(obj)
+
+
+def log_llm_raw_request(tag: str, payload: Any):
+    """
+    LLM 요청(메시지/파라미터)을 raw로 남김.
+    tag 예: "talk.start", "persona.generate" 등
+    """
+    _llm_raw_logger.info("[LLM][REQ][%s]\n%s", tag, _to_pretty(payload))
+
+
+def log_llm_raw_response(tag: str, resp: Any, elapsed_ms: float | None = None):
+    """
+    LLM 응답을 raw로 남김.
+    elapsed_ms가 있으면 같이 남김.
+    """
+    if elapsed_ms is None:
+        _llm_raw_logger.info("[LLM][RESP][%s]\n%s", tag, _to_pretty(resp))
+    else:
+        _llm_raw_logger.info("[LLM][RESP][%s] elapsed_ms=%.1f\n%s", tag, float(elapsed_ms), _to_pretty(resp))
 
 
 # ============================================================

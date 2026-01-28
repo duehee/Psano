@@ -1,15 +1,14 @@
 from __future__ import annotations
 
 from io import BytesIO
-import os
 from typing import Optional, Dict
 
-from fastapi import APIRouter, Depends, Query, HTTPException, File, UploadFile, Header
+from fastapi import APIRouter, Depends, Query, HTTPException, File, UploadFile
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 from database import get_db
-from utils import iso, now_kst_naive, get_config
+from util.utils import iso, now_kst_naive, get_config
 from routers.persona import _generate_persona
 from schemas.admin import (
     AdminSessionsResponse, AdminProgressResponse,
@@ -32,9 +31,6 @@ router = APIRouter()
 # 하드코딩 fallback (DB 없을 때)
 _DEFAULT_MAX_QUESTIONS = 365
 
-# (선택) 최소 인증 토큰: 환경변수 ADMIN_TOKEN 설정 시 강제
-ADMIN_TOKEN = os.getenv("ADMIN_TOKEN")
-
 
 # =========================
 # 공통 유틸리티
@@ -50,14 +46,6 @@ def ensure_psano_state_row(db: Session):
             VALUES (1, 'teach', 1)
         """)
     )
-
-
-def _check_admin_token(x_admin_token: Optional[str]) -> None:
-    """ADMIN_TOKEN 환경변수가 설정된 경우에만 토큰 검증"""
-    if not ADMIN_TOKEN:
-        return
-    if not x_admin_token or x_admin_token != ADMIN_TOKEN:
-        raise HTTPException(status_code=401, detail="Unauthorized (invalid admin token)")
 
 
 # =========================
@@ -161,13 +149,11 @@ def ensure_psano_personality_row(db: Session):
 async def admin_questions_import(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
 ):
     """
     POST /admin/questions/import
     xlsx 업로드로 questions upsert.
     """
-    _check_admin_token(x_admin_token)
 
     if not file.filename.lower().endswith(".xlsx"):
         raise HTTPException(status_code=400, detail="Only .xlsx files are supported")
@@ -292,13 +278,11 @@ S_COL_NOTES = "J"
 async def admin_settings_import(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
 ):
     """
     POST /admin/settings/import
     xlsx 업로드로 psano_growth_stages upsert.
     """
-    _check_admin_token(x_admin_token)
 
     if not file.filename.lower().endswith(".xlsx"):
         raise HTTPException(status_code=400, detail="Only .xlsx files are supported")
@@ -407,6 +391,122 @@ async def admin_settings_import(
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Import failed: {e}")
 
+# =========================
+# Idle (혼잣말) Import
+# =========================
+
+# 컬럼 매핑 (idle 시트)
+# A: id, B: axis_key, C: question_text, D: value, E: enable
+IDLE_COL_ID = "A"
+IDLE_COL_AXIS_KEY = "B"
+IDLE_COL_QUESTION_TEXT = "C"
+IDLE_COL_VALUE = "D"
+IDLE_COL_ENABLE = "E"
+
+@router.post("/idle/import", response_model=AdminQuestionsImportResponse)
+async def admin_idle_import(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    """
+    POST /admin/idle/import
+    xlsx 업로드로 psano_idle upsert.
+    """
+
+    if not file.filename.lower().endswith(".xlsx"):
+        raise HTTPException(status_code=400, detail="Only .xlsx files are supported")
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Empty file")
+
+    try:
+        wb = load_workbook(filename=BytesIO(content), data_only=True)
+        ws = wb.active
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid xlsx file: {e}")
+
+    result = AdminQuestionsImportResponse()
+
+    upsert_sql = text("""
+        INSERT INTO psano_idle
+            (id, axis_key, question_text, value, enable)
+        VALUES
+            (:id, :axis_key, :question_text, :value, :enable)
+        ON DUPLICATE KEY UPDATE
+            axis_key = VALUES(axis_key),
+            question_text = VALUES(question_text),
+            value = VALUES(value),
+            enable = VALUES(enable)
+    """)
+
+    try:
+        for r in range(2, ws.max_row + 1):
+            id_val = _cell_int(ws, IDLE_COL_ID, r)
+            axis_ko = _cell_str(ws, IDLE_COL_AXIS_KEY, r)
+            question_text = _cell_str(ws, IDLE_COL_QUESTION_TEXT, r)
+
+            # 빈 행 스킵
+            if id_val is None and axis_ko == "" and question_text == "":
+                continue
+
+            result.processed += 1
+
+            # axis_key 매핑 (한글 -> 영문)
+            axis_key = _map_axis_key(axis_ko)
+
+            # value는 VARCHAR이므로 문자열로 처리
+            value = _cell_str(ws, IDLE_COL_VALUE, r) or ""
+            enable_raw = _cell_str(ws, IDLE_COL_ENABLE, r)
+            enable = _parse_enabled(enable_raw)
+
+            # 필수값 검증
+            if id_val is None:
+                result.failed += 1
+                result.errors.append(ImportErrorItem(row=r, message="Invalid or missing ID (A column)"))
+                continue
+
+            if not axis_key:
+                result.failed += 1
+                result.errors.append(ImportErrorItem(
+                    row=r, message=f"Invalid axis (B column). Got '{axis_ko}'. Expected: {list(AXIS_MAP.keys())}"
+                ))
+                continue
+
+            if not question_text:
+                result.failed += 1
+                result.errors.append(ImportErrorItem(row=r, message="Missing question_text (C column)"))
+                continue
+
+            if enable is None:
+                result.failed += 1
+                result.errors.append(ImportErrorItem(
+                    row=r, message=f"Invalid enable (E column). Got '{enable_raw}', expected Y/N"
+                ))
+                continue
+
+            params = {
+                "id": id_val,
+                "axis_key": axis_key,
+                "question_text": question_text,
+                "value": value,
+                "enable": enable,
+            }
+
+            res = db.execute(upsert_sql, params)
+            if res.rowcount == 1:
+                result.inserted += 1
+            elif res.rowcount == 2:
+                result.updated += 1
+            else:
+                result.unchanged += 1
+
+        db.commit()
+        return result
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Import failed: {e}")
 
 # =========================
 # 세션/진행률 조회
@@ -603,13 +703,11 @@ def admin_set_current_question(req: AdminSetCurrentQuestionRequest, db: Session 
 @router.get("/personality", response_model=AdminPersonalityGetResponse)
 def admin_personality_get(
     db: Session = Depends(get_db),
-    x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
 ):
     """
     GET /admin/personality
     psano_personality(id=1) 10개 축 조회
     """
-    _check_admin_token(x_admin_token)
 
     try:
         ensure_psano_personality_row(db)
@@ -649,13 +747,11 @@ def admin_personality_get(
 def admin_personality_set(
     req: AdminPersonalitySetRequest,
     db: Session = Depends(get_db),
-    x_admin_token: Optional[str] = Header(default=None, alias="X-Admin-Token"),
 ):
     """
     POST /admin/personality/set
     psano_personality(id=1) 10개 축을 한 번에 덮어쓰기 (테스트용)
     """
-    _check_admin_token(x_admin_token)
 
     try:
         ensure_psano_personality_row(db)
@@ -780,7 +876,7 @@ def admin_config_update(
 @router.post("/config/clear-cache")
 def admin_config_clear_cache():
     """설정 캐시 초기화"""
-    from utils import clear_config_cache
+    from util.utils import clear_config_cache
     clear_config_cache()
     return {"ok": True, "message": "config cache cleared"}
 
@@ -874,7 +970,7 @@ def admin_prompt_update(
 @router.post("/prompts/clear-cache")
 def admin_prompts_clear_cache():
     """프롬프트 캐시 초기화"""
-    from utils import clear_prompt_cache
+    from util.utils import clear_prompt_cache
     clear_prompt_cache()
     return {"ok": True, "message": "prompt cache cleared"}
 
@@ -1187,7 +1283,7 @@ def admin_quick_test(
         start_question_id = int(st["current_question"])
 
         # 2) 세션 생성
-        from utils import now_kst_naive
+        from util.utils import now_kst_naive
         started_at = now_kst_naive()
 
         result = db.execute(
@@ -1297,3 +1393,83 @@ def admin_quick_test(
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"quick test failed: {e}")
+
+
+@router.get("/idle/list")
+def admin_idle_list(
+    db: Session = Depends(get_db),
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    enabled_only: bool = Query(False),
+):
+    """
+    GET /admin/idle/list
+    psano_idle 목록 조회
+    """
+
+    try:
+        where_clause = "WHERE enable = 1" if enabled_only else ""
+
+        total_row = db.execute(
+            text(f"SELECT COUNT(*) AS cnt FROM psano_idle {where_clause}")
+        ).mappings().first()
+        total = int(total_row["cnt"]) if total_row else 0
+
+        rows = db.execute(
+            text(f"""
+                SELECT id, axis_key, question_text, value, enable
+                FROM psano_idle
+                {where_clause}
+                ORDER BY id ASC
+                LIMIT :limit OFFSET :offset
+            """),
+            {"limit": limit, "offset": offset}
+        ).mappings().all()
+
+        items = [{
+            "id": int(r["id"]),
+            "axis_key": r["axis_key"],
+            "question_text": r["question_text"],
+            "value": r["value"] or "",
+            "enable": bool(r["enable"]),
+        } for r in rows]
+
+        return {"total": total, "items": items}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"db error: {e}")
+
+
+@router.put("/idle/{idle_id}/toggle")
+def admin_idle_toggle(
+    idle_id: int,
+    db: Session = Depends(get_db),
+):
+    """
+    PUT /admin/idle/{idle_id}/toggle
+    enable 토글
+    """
+
+    try:
+        row = db.execute(
+            text("SELECT id, enable FROM psano_idle WHERE id = :id"),
+            {"id": idle_id}
+        ).mappings().first()
+
+        if not row:
+            raise HTTPException(status_code=404, detail=f"idle not found: {idle_id}")
+
+        new_enable = 0 if row["enable"] else 1
+        db.execute(
+            text("UPDATE psano_idle SET enable = :enable WHERE id = :id"),
+            {"id": idle_id, "enable": new_enable}
+        )
+        db.commit()
+
+        return {"ok": True, "id": idle_id, "enable": bool(new_enable)}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"db error: {e}")

@@ -7,7 +7,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from routers._store import LOCK, SESSIONS
-from utils import now_kst_naive, iso
+from util.utils import now_kst_naive, iso
 
 
 def end_session_core(db: Session, sid: int, reason: str) -> Dict[str, Any]:

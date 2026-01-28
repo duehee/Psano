@@ -776,6 +776,9 @@ HTML = r"""
         <button class="nav-item" onclick="showSection('talk')">
           <span class="icon">💬</span> Talk
         </button>
+        <button class="nav-item" onclick="showSection('idleTalk')">
+          <span class="icon">🗨️</span> Idle Talk
+        </button>
         <button class="nav-item" onclick="showSection('admin')">
           <span class="icon">⚙️</span> Admin
         </button>
@@ -810,6 +813,7 @@ HTML = r"""
             <div style="display: flex; gap: 8px; margin-bottom: 16px; align-items: center;">
               <button class="btn btn-primary" onclick="testIdleGreeting()">Idle Greeting (인사말)</button>
               <button class="btn btn-secondary" onclick="testIdleMonologue()">Idle Monologue (혼잣말)</button>
+              <button class="btn btn-secondary" onclick="testIdleRandom()">Idle Random (가치축)</button>
               <select id="monologueModel" style="padding: 8px; border-radius: 6px; border: 1px solid var(--border);">
                 <option value="gpt-4o-mini">gpt-4o-mini</option>
                 <option value="gpt-4o">gpt-4o</option>
@@ -823,6 +827,9 @@ HTML = r"""
                 <span id="idleStageInfo">-</span>
               </div>
               <div id="idleResultText" style="font-size: 15px; line-height: 1.8; white-space: pre-wrap;"></div>
+              <div style="margin-top: 12px;">
+                <button class="btn btn-primary btn-sm" onclick="goToIdleTalk()" id="btnStartIdleTalk" style="display: none;">이 혼잣말로 대화 시작 →</button>
+              </div>
             </div>
           </div>
         </div>
@@ -894,6 +901,46 @@ HTML = r"""
               <div class="chat-input-bar">
                 <textarea id="talkInput" placeholder="메시지 입력... (Enter: 전송)" disabled></textarea>
                 <button class="btn btn-primary" onclick="sendTalk()" id="sendTalkBtn" disabled>Send</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Idle Talk Section -->
+      <section class="section" id="sectionIdleTalk">
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Idle Talk (혼잣말 기반 대화)</span>
+            <div style="display: flex; gap: 8px;">
+              <select id="idleTalkModel" style="padding: 6px; border-radius: 6px; border: 1px solid var(--border);">
+                <option value="gpt-4o-mini">gpt-4o-mini</option>
+                <option value="gpt-4o">gpt-4o</option>
+                <option value="gpt-4.1-mini">gpt-4.1-mini</option>
+                <option value="gpt-5-mini">gpt-5-mini</option>
+                <option value="gpt-5.2">gpt-5.2</option>
+              </select>
+              <button class="btn btn-sm btn-danger" onclick="endIdleTalk()">End Idle Talk</button>
+            </div>
+          </div>
+          <div class="card-body">
+            <!-- 선택된 혼잣말 표시 -->
+            <div id="selectedIdleBox" style="padding: 16px; background: var(--secondary); border-radius: 8px; margin-bottom: 16px;">
+              <div style="font-size: 12px; color: var(--muted); margin-bottom: 4px;">선택된 혼잣말</div>
+              <div id="selectedIdleText" style="font-size: 14px;">혼잣말을 선택하세요 (Formation → Idle Random)</div>
+            </div>
+            <!-- 대화 시작 버튼 -->
+            <div style="margin-bottom: 16px;">
+              <button class="btn btn-primary" onclick="startIdleTalk()" id="btnStartIdleTalkMain">대화 시작</button>
+            </div>
+            <!-- 채팅 영역 -->
+            <div class="chat-container" id="idleTalkChatArea" style="display: none;">
+              <div class="chat-messages" id="idleChatMessages" style="height: 350px; overflow-y: auto; padding: 16px; background: var(--secondary); border-radius: 8px; margin-bottom: 12px;">
+                <div class="message system">대화가 시작되면 여기에 표시됩니다</div>
+              </div>
+              <div class="chat-input-bar" style="display: flex; gap: 8px;">
+                <input type="text" id="idleTalkInput" placeholder="메시지를 입력하세요..." style="flex: 1; padding: 12px; border-radius: 8px; border: 1px solid var(--border);" onkeypress="if(event.key==='Enter') sendIdleTurn()">
+                <button class="btn btn-primary" onclick="sendIdleTurn()">Send</button>
               </div>
             </div>
           </div>
@@ -980,7 +1027,7 @@ HTML = r"""
             <span class="card-title">Import</span>
           </div>
           <div class="card-body">
-            <div class="grid-2">
+            <div class="grid-3">
               <div class="form-group">
                 <label class="form-label">Questions (xlsx)</label>
                 <input type="file" id="admXlsxFile" accept=".xlsx" />
@@ -990,6 +1037,11 @@ HTML = r"""
                 <label class="form-label">Settings (xlsx)</label>
                 <input type="file" id="admSettingsXlsxFile" accept=".xlsx" />
                 <button class="btn btn-primary btn-sm" style="margin-top: 8px;" onclick="adminImportSettings()">Upload</button>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Idle (xlsx)</label>
+                <input type="file" id="admIdleXlsxFile" accept=".xlsx" />
+                <button class="btn btn-primary btn-sm" style="margin-top: 8px;" onclick="adminImportIdle()">Upload</button>
               </div>
             </div>
           </div>
@@ -1016,7 +1068,7 @@ HTML = r"""
               </div>
               <div class="form-group" style="flex: 1;">
                 <label class="form-label">Max Tokens</label>
-                <input type="number" id="personaMaxTokens" placeholder="3000" />
+                <input type="number" id="personaMaxTokens" placeholder="8000" />
               </div>
               <div class="form-group" style="flex: 0;">
                 <label class="form-label">&nbsp;</label>
@@ -1484,6 +1536,142 @@ HTML = r"""
     showSpinner(false);
   }
 
+  let currentIdleId = null;  // 현재 선택된 idle ID
+  let currentIdleText = null;  // 현재 선택된 혼잣말 텍스트
+
+  async function testIdleRandom() {
+    showSpinner(true);
+    try {
+      const data = await fetchJson('/idle/random');
+      currentIdleId = data.id;
+      currentIdleText = data.text;
+      document.getElementById('idleStageInfo').textContent = `axis_key: ${data.axis_key} | id: ${data.id}`;
+      document.getElementById('idleResultText').textContent = data.text;
+      document.getElementById('idleResultBox').style.display = 'block';
+      document.getElementById('btnStartIdleTalk').style.display = 'inline-block';
+      // Idle Talk 섹션에도 표시
+      document.getElementById('selectedIdleText').textContent = data.text;
+      log({ endpoint: '/idle/random', data });
+      toast('Idle random loaded', 'success', 2000);
+    } catch (e) {
+      toast(`Idle random failed: ${e.message}`, 'error');
+      log({ error: e.message });
+    }
+    showSpinner(false);
+  }
+
+  // Idle Talk 섹션으로 이동
+  function goToIdleTalk() {
+    if (!currentIdleId) {
+      toast('먼저 Idle Random을 실행하세요', 'error');
+      return;
+    }
+    showSection('idleTalk');
+  }
+
+  // Idle Talk
+  function addIdleChatMessage(role, text) {
+    const el = document.createElement('div');
+    el.className = 'message ' + role;
+    el.style.cssText = 'padding: 8px 12px; margin: 8px 0; border-radius: 8px; ' +
+      (role === 'user' ? 'background: var(--primary); color: white; margin-left: 20%;' :
+       role === 'assistant' ? 'background: white; border: 1px solid var(--border); margin-right: 20%;' :
+       'background: var(--muted); color: white; text-align: center; font-size: 12px;');
+    el.textContent = text;
+    document.getElementById('idleChatMessages').appendChild(el);
+    el.scrollIntoView({ behavior: 'smooth' });
+    return el;
+  }
+
+  async function startIdleTalk() {
+    if (!currentIdleId) {
+      toast('먼저 Formation에서 Idle Random을 실행하세요', 'error');
+      return;
+    }
+    if (!sessionId) {
+      toast('먼저 세션을 생성하세요', 'error');
+      return;
+    }
+
+    showSpinner(true);
+    const model = document.getElementById('idleTalkModel').value;
+
+    try {
+      const data = await fetchJson('/talk/idle/start', {
+        method: 'POST',
+        body: JSON.stringify({
+          session_id: sessionId,
+          idle_id: currentIdleId,
+          model: model
+        })
+      });
+
+      // 채팅 영역 표시
+      document.getElementById('idleTalkChatArea').style.display = 'block';
+      document.getElementById('btnStartIdleTalkMain').style.display = 'none';
+      document.getElementById('idleChatMessages').innerHTML = '';
+      addIdleChatMessage('system', `[혼잣말] ${data.idle_text}`);
+      addIdleChatMessage('assistant', data.assistant_first_text);
+
+      log({ endpoint: '/talk/idle/start', data });
+      toast('Idle Talk started', 'success', 2000);
+    } catch (e) {
+      toast(`Idle Talk start failed: ${e.message}`, 'error');
+      log({ error: e.message });
+    }
+    showSpinner(false);
+  }
+
+  async function sendIdleTurn() {
+    const input = document.getElementById('idleTalkInput');
+    const userText = input.value.trim();
+    if (!userText) return;
+
+    if (!sessionId) {
+      toast('세션이 없습니다', 'error');
+      return;
+    }
+
+    input.value = '';
+    addIdleChatMessage('user', userText);
+    showSpinner(true);
+
+    const model = document.getElementById('idleTalkModel').value;
+
+    try {
+      const data = await fetchJson('/talk/idle/turn', {
+        method: 'POST',
+        body: JSON.stringify({
+          session_id: sessionId,
+          user_text: userText,
+          model: model
+        })
+      });
+
+      addIdleChatMessage('assistant', data.ui_text);
+      log({ endpoint: '/talk/idle/turn', data });
+
+      if (data.should_end) {
+        addIdleChatMessage('system', '대화가 종료되었습니다.');
+      }
+    } catch (e) {
+      toast(`Idle Turn failed: ${e.message}`, 'error');
+      log({ error: e.message });
+    }
+    showSpinner(false);
+  }
+
+  function endIdleTalk() {
+    document.getElementById('idleTalkChatArea').style.display = 'none';
+    document.getElementById('btnStartIdleTalkMain').style.display = 'inline-block';
+    document.getElementById('idleChatMessages').innerHTML = '<div class="message system">대화가 시작되면 여기에 표시됩니다</div>';
+    currentIdleId = null;
+    currentIdleText = null;
+    document.getElementById('selectedIdleText').textContent = '혼잣말을 선택하세요 (Formation → Idle Random)';
+    document.getElementById('btnStartIdleTalk').style.display = 'none';
+    toast('Idle Talk ended', 'success', 2000);
+  }
+
   // Topics
   async function loadTopics() {
     try {
@@ -1724,6 +1912,19 @@ HTML = r"""
     }
   }
 
+  async function adminImportIdle() {
+    const file = document.getElementById('admIdleXlsxFile').files[0];
+    if (!file) return log('No file selected');
+    const fd = new FormData();
+    fd.append('file', file);
+    try {
+      const data = await fetchMultipart('/admin/idle/import', fd);
+      log({ endpoint: '/admin/idle/import', data });
+    } catch (e) {
+      log({ error: e.message });
+    }
+  }
+
   async function personaGenerate() {
     const body = {};
     const model = document.getElementById('personaModel').value;
@@ -1733,7 +1934,7 @@ HTML = r"""
     if (document.getElementById('personaForce').checked) body.force = true;
 
     showSpinner(true);
-    toast(`Generating persona with ${model}...`, 'info', 3000);
+    toast(`Generating persona with ${model}...`, 'info', 8000);
     try {
       const data = await fetchJson('/persona/generate', { method: 'POST', body: JSON.stringify(body) });
       log({ endpoint: '/persona/generate', data });
@@ -2290,7 +2491,7 @@ HTML = r"""
               <li>gpt-5.2 (최신 flagship)</li>
             </ul>
           </li>
-          <li><strong>Max Tokens</strong>: 생성할 페르소나 최대 토큰 (기본 3000)</li>
+          <li><strong>Max Tokens</strong>: 생성할 페르소나 최대 토큰 (기본 8000)</li>
           <li><strong>force</strong>: 기존 persona가 있어도 재생성</li>
         </ul>
         <p style="color: var(--muted); font-size: 12px;">* LLM 호출 실패 시 fallback 페르소나가 적용됩니다.</p>

@@ -4,7 +4,7 @@ from sqlalchemy import text
 
 from database import get_db
 from schemas.question import QuestionResponse
-from utils import get_config
+from util.utils import get_config
 
 router = APIRouter()
 

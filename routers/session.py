@@ -11,7 +11,7 @@ from schemas.session import (
 )
 from routers._store import LOCK, GLOBAL_STATE, SESSIONS
 from database import get_db
-from utils import now_kst_naive, iso
+from util.utils import now_kst_naive, iso
 
 router = APIRouter()
 

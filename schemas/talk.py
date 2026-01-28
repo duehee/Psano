@@ -47,3 +47,36 @@ class TopicItem(BaseModel):
 
 class TopicsResponse(BaseModel):
     topics: List[TopicItem]
+
+
+# =========================
+# Idle Talk (혼잣말 기반 대화)
+# =========================
+
+class IdleTalkStartRequest(BaseModel):
+    session_id: int = Field(..., ge=1)
+    idle_id: int = Field(..., ge=1)  # 혼잣말 ID
+    model: str = "gpt-4o-mini"
+    max_output_tokens: Optional[int] = None
+
+
+class IdleTalkStartResponse(BaseModel):
+    status: Status
+    assistant_first_text: str
+    idle_text: str  # 원본 혼잣말 텍스트
+    fallback_code: Optional[str] = None
+
+
+class IdleTalkTurnRequest(BaseModel):
+    session_id: int = Field(..., ge=1)
+    user_text: str = Field(..., min_length=1, max_length=200)
+    model: str = "gpt-4o-mini"
+    max_output_tokens: Optional[int] = None
+
+
+class IdleTalkTurnResponse(BaseModel):
+    status: Status
+    ui_text: str
+    fallback_code: Optional[str] = None
+    policy_category: Optional[str] = None
+    should_end: bool = False

@@ -6,7 +6,7 @@ from sqlalchemy import text
 from database import get_db
 from schemas.answer import AnswerRequest, AnswerResponse
 from services.llm_service import call_llm
-from utils import load_growth_stage, get_config, get_prompt
+from util.utils import load_growth_stage, get_config, get_prompt
 
 router = APIRouter()
 

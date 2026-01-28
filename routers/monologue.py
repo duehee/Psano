@@ -13,7 +13,7 @@ from schemas.monologue import (
 # (선택) 정책 필터 재사용하고 싶으면 import
 from routers.talk_policy import moderate_text, generate_policy_response, Action
 from services.llm_service import call_llm
-from utils import trim, summary_to_text, load_growth_stage
+from util.utils import trim, summary_to_text, load_growth_stage
 
 
 OUTPUT_LIMIT = 150
