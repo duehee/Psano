@@ -3,7 +3,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from services.session_service import end_session_core
-from utils import iso, trim, summary_to_text
+from utils import iso, trim, summary_to_text, get_prompt
 
 from schemas.talk import (
     TalkRequest,
@@ -103,10 +103,22 @@ def build_prompt(user_text: str, persona: str | None, summary) -> str:
     )
 
 
-def build_start_prompt(*, persona: str | None, summary, topic_ctx: str) -> str:
+def build_start_prompt(db: Session, *, persona: str | None, summary, topic_ctx: str) -> str:
     persona = (persona or "").strip()
     summary_text = summary_to_text(summary).strip()
 
+    # DB에서 프롬프트 템플릿 로드
+    template = get_prompt(db, "talk_start_prompt", "")
+
+    if template:
+        return template.format(
+            persona=persona,
+            values_summary=summary_text,
+            topic_ctx=topic_ctx,
+            output_limit=OUTPUT_LIMIT,
+        )
+
+    # fallback: 하드코딩 프롬프트
     base = []
     if persona:
         base.append(f"[persona_prompt]\n{persona}\n")
@@ -158,6 +170,7 @@ def _get_recent_turns(db: Session, session_id: int, limit_rows: int) -> str:
 
 
 def build_turn_prompt(
+    db: Session,
     *,
     persona: str | None,
     summary,
@@ -172,6 +185,22 @@ def build_turn_prompt(
     mem = trim(session_memory or "", MEMORY_LIMIT)
     recent = (recent_turns or "").strip()
 
+    # DB에서 프롬프트 템플릿 로드
+    template = get_prompt(db, "talk_turn_prompt", "")
+
+    if template:
+        return template.format(
+            persona=persona,
+            values_summary=summary_text,
+            topic_ctx=topic_ctx,
+            session_memory=mem,
+            recent_turns=recent,
+            user_text=user_text,
+            output_limit=OUTPUT_LIMIT,
+            memory_limit=MEMORY_LIMIT,
+        )
+
+    # fallback: 하드코딩 프롬프트
     return (
         f"{persona}\n"
         "Output language: Korean.\n"
@@ -287,8 +316,9 @@ def talk_start(req: TalkStartRequest, db: Session = Depends(get_db)):
     # 3) topic 로드
     topic_ctx = _topic_context(db, req.topic_id)
 
-    # 4) 프롬프트 구성
+    # 4) 프롬프트 구성 (DB에서 템플릿 로드)
     prompt = build_start_prompt(
+        db,
         persona=st.get("persona_prompt"),
         summary=st.get("values_summary"),
         topic_ctx=topic_ctx,
@@ -299,7 +329,7 @@ def talk_start(req: TalkStartRequest, db: Session = Depends(get_db)):
     result = call_llm(
         prompt,
         model=getattr(req, "model", None),
-        max_tokens=getattr(req, "max_output_tokens", None) or 180,
+        max_tokens=getattr(req, "max_output_tokens", None) or 1000,  # GPT-5 reasoning 모델은 더 많은 토큰 필요
         fallback_text=fallback_text,
     )
 
@@ -412,8 +442,9 @@ def talk_turn(req: TalkRequest, db: Session = Depends(get_db)):
     session_memory = trim(sess.get("talk_memory") or "", MEMORY_LIMIT)
     recent_turns = _get_recent_turns(db, req.session_id, RECENT_TURNS)
 
-    # 4) 프롬프트 구성(대화형)
+    # 4) 프롬프트 구성(대화형, DB에서 템플릿 로드)
     prompt = build_turn_prompt(
+        db,
         persona=st.get("persona_prompt"),
         summary=st.get("values_summary"),
         topic_ctx=topic_ctx.strip(),
@@ -427,7 +458,7 @@ def talk_turn(req: TalkRequest, db: Session = Depends(get_db)):
     result = call_llm(
         prompt,
         model=getattr(req, "model", None),
-        max_tokens=getattr(req, "max_output_tokens", None) or 220,
+        max_tokens=getattr(req, "max_output_tokens", None) or 1000,  # GPT-5 reasoning 모델은 더 많은 토큰 필요
         fallback_text="",  # 파싱 후 처리하므로 빈 문자열
     )
 

@@ -9,7 +9,7 @@ LOCK = RLock()
 # 전역 상태(= psano_state 흉내) - 메모리 캐시용
 GLOBAL_STATE: Dict[str, Any] = {
     "phase": "teach",              # teach / talk
-    "current_question": 1,         # 1~380
+    "current_question": 1,         # 1~365
     "formed_at": None,             # timestamp(float) or None
     "persona_prompt": None,        # str or None
     "values_summary": None,        # dict/json or None

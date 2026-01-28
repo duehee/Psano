@@ -10,7 +10,7 @@ router = APIRouter()
 
 # 하드코딩 fallback (DB 없을 때)
 _DEFAULT_SESSION_LIMIT = 5
-_DEFAULT_MAX_QUESTIONS = 380
+_DEFAULT_MAX_QUESTIONS = 365
 
 @router.get("/current", response_model=QuestionResponse)
 def get_current_question(

@@ -176,7 +176,7 @@ def idle_monologue(req: MonologueRequest, db: Session = Depends(get_db)):
     result = call_llm(
         prompt,
         model=req.model,
-        max_tokens=req.max_output_tokens or 120,
+        max_tokens=req.max_output_tokens or 800,  # GPT-5 reasoning 모델 대응
         fallback_text=fallback_text,
     )
 
@@ -355,7 +355,7 @@ def talk_nudge(req: NudgeRequest, db: Session = Depends(get_db)):
         result = call_llm(
             prompt,
             model=req.model,
-            max_tokens=req.max_output_tokens or 90,
+            max_tokens=req.max_output_tokens or 800,  # GPT-5 reasoning 모델 대응
             fallback_text=fallback_text,
         )
 

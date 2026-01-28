@@ -14,7 +14,7 @@ from services.llm_service import client
 router = APIRouter()
 
 # 하드코딩 fallback (DB 없을 때)
-_DEFAULT_TOTAL_QUESTIONS = 380
+_DEFAULT_TOTAL_QUESTIONS = 365
 _DEFAULT_PAIR_QUESTION_COUNT = 76
 
 # 네 psano_personality 컬럼(스크린샷 기준)
@@ -162,7 +162,7 @@ def _build_llm_prompt(db: Session, values_summary: str, pair_insights: Dict[str,
 [사노 배경 설정]
 ═══════════════════════════════════════════════════════════════
 - 사노는 전시장에 설치된 인터랙티브 미디어아트 작품의 AI 캐릭터
-- 관람객들의 380개 가치 선택 질문 응답을 통해 "성장"하며 인격이 형성됨
+- 관람객들의 365개 가치 선택 질문 응답을 통해 "성장"하며 인격이 형성됨
 - 사노는 관람객과의 대화를 통해 삶, 가치, 선택에 대해 함께 탐구함
 - 철학적이면서도 친근한 존재로, 정답을 제시하기보다 질문을 던지는 스타일
 
@@ -241,7 +241,7 @@ def _build_llm_prompt(db: Session, values_summary: str, pair_insights: Dict[str,
 - 한국어로 작성, 마크다운 형식 사용
 """.strip()
 
-def _generate_persona(db: Session, *, force: bool, model: str | None, allow_under_380: bool) -> PersonaGenerateResponse:
+def _generate_persona(db: Session, *, force: bool, model: str | None, allow_under_365: bool) -> PersonaGenerateResponse:
     # 설정값 로드
     total_questions = get_config(db, "max_questions", _DEFAULT_TOTAL_QUESTIONS)
     pair_count = get_config(db, "pair_question_count", _DEFAULT_PAIR_QUESTION_COUNT)
@@ -288,8 +288,8 @@ def _generate_persona(db: Session, *, force: bool, model: str | None, allow_unde
     if answered_total > total_questions:
         answered_total = total_questions
 
-    # 실전 /persona/generate 에서는 380 미만이면 막음(관리자 테스트는 allow_under_380=True 가능)
-    if (answered_total < total_questions) and (not allow_under_380) and (not force):
+    # 실전 /persona/generate 에서는 365 미만이면 막음(관리자 테스트는 allow_under_365=True 가능)
+    if (answered_total < total_questions) and (not 365) and (not force):
         raise HTTPException(
             status_code=409,
             detail=f"not ready: answered_total={answered_total} (need {total_questions})"
@@ -366,7 +366,7 @@ def _generate_persona(db: Session, *, force: bool, model: str | None, allow_unde
         if not persona_prompt:
             persona_prompt = """## 1. IDENTITY (정체성)
 나는 사노(Psano). 전시장에 존재하는 인터랙티브 미디어아트 작품의 AI야.
-관람객들이 380개의 가치 선택 질문에 답하면서 나를 성장시켰어.
+관람객들이 365개의 가치 선택 질문에 답하면서 나를 성장시켰어.
 나는 그 수많은 선택들이 모여 형성된 존재야. 정답을 알려주는 게 아니라, 함께 질문하고 생각하는 걸 좋아해.
 
 ## 2. PERSONALITY (성격 특성)
@@ -444,13 +444,13 @@ def _generate_persona(db: Session, *, force: bool, model: str | None, allow_unde
 
 @router.post("/generate", response_model=PersonaGenerateResponse)
 def persona_generate(req: PersonaGenerateRequest, db: Session = Depends(get_db)):
-    # 실전용: 380 미만이면 기본적으로 막음(force도 막고 싶으면 아래 로직에서 force 제거하면 됨)
+    # 실전용: 365 미만이면 기본적으로 막음(force도 막고 싶으면 아래 로직에서 force 제거하면 됨)
     try:
         return _generate_persona(
             db,
             force=req.force,
             model=req.model,
-            allow_under_380=False,
+            allow_under_365=False,
         )
     except HTTPException:
         raise

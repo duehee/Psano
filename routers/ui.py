@@ -807,9 +807,16 @@ HTML = r"""
             </div>
           </div>
           <div class="card-body">
-            <div class="grid-2" style="margin-bottom: 16px;">
+            <div style="display: flex; gap: 8px; margin-bottom: 16px; align-items: center;">
               <button class="btn btn-primary" onclick="testIdleGreeting()">Idle Greeting (인사말)</button>
               <button class="btn btn-secondary" onclick="testIdleMonologue()">Idle Monologue (혼잣말)</button>
+              <select id="monologueModel" style="padding: 8px; border-radius: 6px; border: 1px solid var(--border);">
+                <option value="gpt-4o-mini">gpt-4o-mini</option>
+                <option value="gpt-4o">gpt-4o</option>
+                <option value="gpt-4.1-mini">gpt-4.1-mini</option>
+                <option value="gpt-5-mini">gpt-5-mini</option>
+                <option value="gpt-5.2">gpt-5.2</option>
+              </select>
             </div>
             <div id="idleResultBox" style="padding: 20px; background: var(--secondary); border-radius: 8px; display: none;">
               <div style="font-size: 12px; color: var(--muted); margin-bottom: 8px;">
@@ -868,12 +875,16 @@ HTML = r"""
                   <option value="1">Topic 1</option>
                 </select>
                 <select id="talkModel" style="flex: 0; min-width: 180px;">
-                  <option value="gpt-4o-mini">gpt-4o-mini (빠름)</option>
-                  <option value="gpt-5.2">gpt-5.2 (최신 주력)</option>
-                  <option value="gpt-5">gpt-5 (고품질)</option>
-                  <option value="gpt-5-mini">gpt-5-mini (빠름/저렴)</option>
-                  <option value="gpt-4.1">gpt-4.1 (안정/정확)</option>
-                  <option value="gpt-4o">gpt-4o (범용)</option>
+                  <option value="gpt-4o-mini">gpt-4o-mini (빠름/저렴)</option>
+                  <option value="gpt-4o">gpt-4o (균형)</option>
+                  <option value="gpt-4.1-nano">gpt-4.1-nano (4.1 최경량)</option>
+                  <option value="gpt-4.1-mini">gpt-4.1-mini (4.1 경량)</option>
+                  <option value="gpt-4.1">gpt-4.1 (4.1 기본)</option>
+                  <option value="gpt-5-nano">gpt-5-nano (5 최경량)</option>
+                  <option value="gpt-5-mini">gpt-5-mini (5 경량)</option>
+                  <option value="gpt-5">gpt-5 (5 기본)</option>
+                  <option value="gpt-5.2">gpt-5.2 (최신)</option>
+                  <option value="o3-mini">o3-mini (추론 경량)</option>
                 </select>
                 <button class="btn btn-primary" onclick="talkStart()">Start Talk</button>
               </div>
@@ -904,7 +915,7 @@ HTML = r"""
                 <div class="stat-label">Answered</div>
               </div>
               <div class="stat">
-                <div class="stat-value" id="admMax">380</div>
+                <div class="stat-value" id="admMax">365</div>
                 <div class="stat-label">Total</div>
               </div>
               <div class="stat">
@@ -994,12 +1005,13 @@ HTML = r"""
               <div class="form-group" style="flex: 2;">
                 <label class="form-label">Model</label>
                 <select id="personaModel">
-                  <option value="gpt-4o-mini">gpt-4o-mini (빠름)</option>
-                  <option value="gpt-5.2">gpt-5.2 (최신 주력)</option>
-                  <option value="gpt-5">gpt-5 (고품질)</option>
-                  <option value="gpt-5-mini">gpt-5-mini (빠름/저렴)</option>
-                  <option value="gpt-4.1">gpt-4.1 (안정/정확)</option>
-                  <option value="gpt-4o">gpt-4o (범용)</option>
+                  <option value="gpt-4o-mini">gpt-4o-mini (빠름/저렴)</option>
+                  <option value="gpt-4o">gpt-4o (균형)</option>
+                  <option value="gpt-4.1-mini">gpt-4.1-mini (4.1 경량)</option>
+                  <option value="gpt-4.1">gpt-4.1 (4.1 기본)</option>
+                  <option value="gpt-5-mini">gpt-5-mini (5 경량)</option>
+                  <option value="gpt-5">gpt-5 (5 기본)</option>
+                  <option value="gpt-5.2">gpt-5.2 (최신)</option>
                 </select>
               </div>
               <div class="form-group" style="flex: 1;">
@@ -1453,10 +1465,11 @@ HTML = r"""
 
   async function testIdleMonologue() {
     showSpinner(true);
+    const model = document.getElementById('monologueModel').value;
     try {
       const data = await fetchJson('/monologue', {
         method: 'POST',
-        body: JSON.stringify({})
+        body: JSON.stringify({ model: model })
       });
       document.getElementById('stageBadge').textContent = `stage: ${data.stage_id} (${data.stage_name_kr})`;
       document.getElementById('idleStageInfo').textContent = `Stage ${data.stage_id}: ${data.stage_name_kr} (${data.stage_name_en}) | answered: ${data.answered_total}`;
@@ -1585,13 +1598,14 @@ HTML = r"""
       return log('No active talk');
     }
 
+    const model = document.getElementById('talkModel').value;
     const typing = addChatMessage('assistant', '(thinking...)');
     showSpinner(true);
 
     try {
       const data = await fetchJson('/monologue/nudge', {
         method: 'POST',
-        body: JSON.stringify({ session_id: sessionId })
+        body: JSON.stringify({ session_id: sessionId, model: model })
       });
       typing.textContent = data.monologue_text || '';
       typing.style.fontStyle = 'italic';
@@ -2198,7 +2212,7 @@ HTML = r"""
           <li><strong>Session Start</strong> → 방문자 이름 입력 후 세션 시작</li>
           <li><strong>Formation</strong> → A/B 질문 5개 응답 (성격 형성)</li>
           <li><strong>Session End</strong> → 세션 종료 (personality 반영)</li>
-          <li><strong>Talk</strong> → 380문항 완료 후 대화 가능</li>
+          <li><strong>Talk</strong> → 365문항 완료 후 대화 가능</li>
         </ul>
       </div>
     `,
@@ -2225,15 +2239,15 @@ HTML = r"""
     talk: `
       <div class="help-section">
         <h4>💬 Talk (대화)</h4>
-        <p>380문항 형성 완료 후 사노와 자유 대화를 나눌 수 있습니다.</p>
+        <p>365문항 형성 완료 후 사노와 자유 대화를 나눌 수 있습니다.</p>
         <ul>
           <li><strong>Topic 선택</strong>: 대화 주제 선택 (Load Topics로 목록 불러오기)</li>
           <li><strong>Model 선택</strong>: 대화에 사용할 LLM 모델 선택
             <ul style="margin-top:4px; font-size:12px; color:var(--muted);">
               <li>gpt-4o-mini: 빠름, 저렴</li>
-              <li>gpt-4o: 균형 잡힌 성능</li>
-              <li>gpt-4.5-preview: 최신 고성능</li>
-              <li>o1/o3-mini: 추론 특화 모델</li>
+              <li>gpt-4o: 균형</li>
+              <li>gpt-5-nano/mini: GPT-5 경량</li>
+              <li>gpt-5.2: 최신 flagship</li>
             </ul>
           </li>
           <li><strong>Start Talk</strong>: 선택한 주제와 모델로 대화 시작</li>
@@ -2266,14 +2280,14 @@ HTML = r"""
       </div>
       <div class="help-section">
         <h4>🎭 Persona Generate</h4>
-        <p>380문항 완료 후 LLM으로 사노의 persona_prompt 생성</p>
+        <p>365문항 완료 후 LLM으로 사노의 persona_prompt 생성</p>
         <ul>
           <li><strong>Model</strong>: 사용할 GPT 모델 선택
             <ul style="margin-top:4px; font-size:12px; color:var(--muted);">
               <li>gpt-4o-mini (빠름, 저렴) - 기본값</li>
               <li>gpt-4o (균형)</li>
-              <li>gpt-4.5-preview (최신 고성능)</li>
-              <li>o1, o3-mini (추론 특화)</li>
+              <li>gpt-5-nano/mini (GPT-5 경량)</li>
+              <li>gpt-5.2 (최신 flagship)</li>
             </ul>
           </li>
           <li><strong>Max Tokens</strong>: 생성할 페르소나 최대 토큰 (기본 3000)</li>

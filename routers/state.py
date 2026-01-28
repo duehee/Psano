@@ -20,7 +20,7 @@ VALUE_KEYS = [
     "universalism",
 ]
 
-TALK_UNLOCK_THRESHOLD = 380
+TALK_UNLOCK_THRESHOLD = 365
 
 @router.get("", response_model=StateResponse)
 def get_state(db: Session = Depends(get_db)):

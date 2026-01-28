@@ -48,7 +48,7 @@ class AdminProgressResponse(BaseModel):
     phase: Phase
     current_question: int         # "지금 열려있는(다음) 질문 번호"
     answered_count: int           # current_question - 1 (formation 기준)
-    max_questions: int            # 380
+    max_questions: int            # 365
     progress_ratio: float         # 0~1
 
 class AdminResetRequest(BaseModel):
@@ -72,7 +72,7 @@ class AdminPhaseSetResponse(BaseModel):
     phase: Phase
 
 class AdminSetCurrentQuestionRequest(BaseModel):
-    current_question: int = Field(..., ge=1, le=380)
+    current_question: int = Field(..., ge=1, le=365)
 
 class AdminSetCurrentQuestionResponse(BaseModel):
     ok: bool

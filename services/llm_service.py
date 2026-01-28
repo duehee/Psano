@@ -13,7 +13,7 @@ from typing import Optional
 from openai import OpenAI
 
 # 설정
-LLM_TIMEOUT = 8  # 초
+LLM_TIMEOUT = 30  # 초 (GPT-5 모델은 더 오래 걸릴 수 있음)
 LLM_RETRY_COUNT = 2
 DEFAULT_MODEL = "gpt-4o-mini"
 
@@ -52,28 +52,53 @@ def call_llm(
 
     for attempt in range(LLM_RETRY_COUNT):
         try:
-            resp = client.chat.completions.create(
-                model=model,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=max_tokens,
-                timeout=LLM_TIMEOUT,
-            )
+            # GPT-5, o1, o3 모델은 max_completion_tokens 사용
+            is_new_model = any(x in model for x in ['gpt-5', 'gpt-4.1', 'o1', 'o3'])
 
-            content = (resp.choices[0].message.content or "").strip()
+            if is_new_model:
+                resp = client.chat.completions.create(
+                    model=model,
+                    messages=[{"role": "user", "content": prompt}],
+                    max_completion_tokens=max_tokens,
+                    timeout=LLM_TIMEOUT,
+                )
+            else:
+                resp = client.chat.completions.create(
+                    model=model,
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=max_tokens,
+                    timeout=LLM_TIMEOUT,
+                )
+
+            # 응답 디버깅
+            print(f"[LLM] raw response: {resp}")
+            print(f"[LLM] choices: {resp.choices}")
+
+            if not resp.choices:
+                raise RuntimeError("no choices in response")
+
+            message = resp.choices[0].message
+            print(f"[LLM] message: {message}")
+
+            content = (message.content or "").strip()
 
             if not content:
+                # reasoning 모델은 content 대신 다른 필드 사용할 수 있음
+                print(f"[LLM] content empty, checking other fields...")
                 raise RuntimeError("empty output from LLM")
 
             return LLMResult(success=True, content=content, fallback_code=None)
 
         except Exception as e:
             last_error = e
+            print(f"[LLM] attempt {attempt+1}/{LLM_RETRY_COUNT} failed: {type(e).__name__}: {e}")
             # 마지막 시도가 아니면 잠시 대기 후 재시도
             if attempt < LLM_RETRY_COUNT - 1:
                 time.sleep(0.5)
             continue
 
     # 모든 재시도 실패
+    print(f"[LLM] all retries failed. model={model}, error={last_error}")
     fallback_code = _map_error_to_code(last_error)
     return LLMResult(
         success=False,

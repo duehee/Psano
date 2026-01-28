@@ -30,7 +30,7 @@ except ImportError:
 router = APIRouter()
 
 # 하드코딩 fallback (DB 없을 때)
-_DEFAULT_MAX_QUESTIONS = 380
+_DEFAULT_MAX_QUESTIONS = 365
 
 # (선택) 최소 인증 토큰: 환경변수 ADMIN_TOKEN 설정 시 강제
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN")
@@ -703,9 +703,9 @@ def admin_personality_set(
 
 @router.post("/generate", response_model=PersonaGenerateResponse)
 def admin_persona_generate(req: PersonaGenerateRequest, db: Session = Depends(get_db)):
-    """관리자 테스트용: 380 미만이어도 페르소나 생성 가능"""
+    """관리자 테스트용: 365 미만이어도 페르소나 생성 가능"""
     try:
-        return _generate_persona(db, force=req.force, model=req.model, allow_under_380=True)
+        return _generate_persona(db, force=req.force, model=req.model, allow_under_365=True)
     except HTTPException:
         raise
     except Exception as e:
