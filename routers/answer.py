@@ -7,7 +7,7 @@ from database import get_db
 from schemas.answer import AnswerRequest, AnswerResponse
 from services.llm_service import call_llm
 from util.utils import load_growth_stage, get_config, get_prompt
-from util.constants import ALLOWED_VALUE_KEYS, DEFAULT_SESSION_QUESTION_LIMIT
+from util.constants import ALLOWED_VALUE_KEYS, DEFAULT_SESSION_QUESTION_LIMIT, MAX_QUESTIONS
 
 router = APIRouter()
 
@@ -229,6 +229,15 @@ def post_answer(req: AnswerRequest, db: Session = Depends(get_db)):
         answered_total = int(total_row["cnt"]) if total_row else 0
 
         db.commit()
+
+        # 7) 365 도달 시 자동 페르소나 생성 (형성기 완료)
+        if answered_total == MAX_QUESTIONS:
+            try:
+                from routers.persona import _generate_persona
+                _generate_persona(db, force=False, model=None, allow_under_365=False)
+            except Exception:
+                # 실패해도 답변 응답은 정상 반환 (다음 답변 시 재시도됨)
+                pass
 
     except HTTPException:
         db.rollback()

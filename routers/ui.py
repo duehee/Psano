@@ -1522,13 +1522,26 @@ HTML = r"""
       toast('먼저 Formation에서 Idle Random을 실행하세요', 'error');
       return;
     }
-    if (!sessionId) {
-      toast('먼저 세션을 생성하세요', 'error');
-      return;
-    }
 
     showSpinner(true);
     const model = document.getElementById('talkModel').value;
+
+    // 세션이 없으면 자동 생성 (대화기용 - 닉네임 기본값 사용)
+    if (!sessionId) {
+      try {
+        const sessData = await fetchJson('/session/start', {
+          method: 'POST',
+          body: JSON.stringify({})
+        });
+        sessionId = sessData.session_id;
+        document.getElementById('sessionId').textContent = sessionId;
+        log({ endpoint: '/session/start (auto)', data: sessData });
+      } catch (e) {
+        showSpinner(false);
+        toast(`Session auto-create failed: ${e.message}`, 'error');
+        return;
+      }
+    }
 
     try {
       const data = await fetchJson('/talk/start', {

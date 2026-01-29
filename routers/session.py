@@ -31,9 +31,7 @@ def _read_session_row(db: Session, sid: int):
 
 @router.post("/start", response_model=SessionStartResponse)
 def start_session(req: SessionStartRequest, db: Session = Depends(get_db)):
-    name = (req.visitor_name or "").strip()
-    if not name:
-        raise HTTPException(status_code=400, detail="visitor_name is empty")
+    name = (req.visitor_name or "").strip() or "관람객"
 
     try:
         started_at = now_kst_naive()  # KST +9
