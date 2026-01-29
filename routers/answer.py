@@ -114,9 +114,10 @@ def _reaction_text_gpt(
     else:
         fallback_text = fallback_reactions[int(time.time()) % len(fallback_reactions)]
 
-    # LLM 호출 (공통 래퍼: timeout 8초, retry 2회)
+    # LLM 호출 (설정: psano_config에서 로드)
     result = call_llm(
         prompt,
+        db=db,
         max_tokens=reaction_max_tokens,
         fallback_text=fallback_text,
     )

@@ -147,10 +147,11 @@ def idle_monologue(req: MonologueRequest, db: Session = Depends(get_db)):
             "stage_name_en": stage.get("stage_name_en") or "Nascent",
         }
 
-    # LLM 호출 (공통 래퍼: timeout 8초, retry 2회)
+    # LLM 호출 (설정: psano_config에서 로드)
     fallback_text = FALLBACK_LINES[int(time.time()) % len(FALLBACK_LINES)]
     result = call_llm(
         prompt,
+        db=db,
         model=req.model,
         max_tokens=req.max_output_tokens or 800,  # GPT-5 reasoning 모델 대응
         fallback_text=fallback_text,
@@ -338,6 +339,7 @@ def talk_nudge(req: NudgeRequest, db: Session = Depends(get_db)):
         fallback_text = FALLBACK_LINES[int(time.time()) % len(FALLBACK_LINES)]
         result = call_llm(
             prompt,
+            db=db,
             model=req.model,
             max_tokens=req.max_output_tokens or 800,
             fallback_text=fallback_text,

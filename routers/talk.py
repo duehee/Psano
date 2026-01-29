@@ -20,7 +20,8 @@ from schemas.talk import (
 from schemas.common import Status
 from database import get_db
 from services.llm_service import call_llm
-from util.talk_utils import apply_policy_guard, OUTPUT_LIMIT
+from util.talk_utils import get_policy_guide, OUTPUT_LIMIT
+from routers._store import LOCK, SESSIONS
 
 INPUT_LIMIT = 200
 MEMORY_LIMIT = 600
@@ -43,11 +44,6 @@ def _safe_format(template: str, **kwargs) -> str:
     for key, value in kwargs.items():
         result = result.replace("{" + key + "}", str(value))
     return result
-
-
-def _apply_policy_guard(db: Session, text_for_check: str, user_text: str):
-    """apply_policy_guard 래퍼 (하위 호환성)"""
-    return apply_policy_guard(db, text_for_check, user_text)
 
 
 # =========================
@@ -165,11 +161,13 @@ def _build_turn_prompt(
     recent_turns: str,
     user_text: str,
     visitor_name: str = "",
+    policy_guide: str | None = None,
 ) -> str:
     """대화 턴 프롬프트 생성"""
     persona = persona or "You are Psano."
     summary_text = summary_to_text(summary)
     visitor_name = (visitor_name or "").strip()
+    policy_section = f"\n{policy_guide}\n" if policy_guide else ""
 
     mem = trim(session_memory or "", MEMORY_LIMIT)
     recent = (recent_turns or "").strip()
@@ -188,6 +186,7 @@ def _build_turn_prompt(
             visitor_name=visitor_name,
             output_limit=OUTPUT_LIMIT,
             memory_limit=MEMORY_LIMIT,
+            policy_guide=policy_section,
         )
 
     # fallback: 하드코딩 프롬프트
@@ -199,6 +198,7 @@ def _build_turn_prompt(
         f"Values summary: {summary_text}\n\n"
         f"{visitor_section}"
         f"{idle_ctx}\n"
+        f"{policy_section}"
         f"[session_memory]\n{mem}\n\n"
         f"[recent_turns]\n{recent}\n\n"
         "규칙:\n"
@@ -263,6 +263,7 @@ def _parse_assistant_and_memory(raw: str) -> tuple[str, str]:
 
 def _update_session_memory(db: Session, session_id: int, memory: str):
     """sessions.idle_talk_memory / idle_turn_count 업데이트"""
+    mem_trimmed = trim(memory or "", MEMORY_LIMIT)
     db.execute(
         text("""
             UPDATE sessions
@@ -270,9 +271,16 @@ def _update_session_memory(db: Session, session_id: int, memory: str):
                 idle_turn_count = COALESCE(idle_turn_count, 0) + 1
             WHERE id = :sid
         """),
-        {"sid": session_id, "mem": trim(memory or "", MEMORY_LIMIT)},
+        {"sid": session_id, "mem": mem_trimmed},
     )
     db.commit()
+
+    # 메모리 캐시 동기화
+    with LOCK:
+        sess = SESSIONS.get(session_id)
+        if sess:
+            sess["idle_talk_memory"] = mem_trimmed
+            sess["idle_turn_count"] = (sess.get("idle_turn_count") or 0) + 1
 
 
 # =========================
@@ -329,6 +337,14 @@ def talk_start(req: TalkStartRequest, db: Session = Depends(get_db)):
         )
         db.commit()
 
+        # 메모리 캐시 동기화
+        with LOCK:
+            cached_sess = SESSIONS.get(req.session_id)
+            if cached_sess:
+                cached_sess["idle_id"] = int(req.idle_id)
+                cached_sess["idle_talk_memory"] = ""
+                cached_sess["idle_turn_count"] = 0
+
     # 3) idle 컨텍스트 로드
     idle_ctx, monologue_text = _idle_context(db, req.idle_id)
 
@@ -345,6 +361,7 @@ def talk_start(req: TalkStartRequest, db: Session = Depends(get_db)):
     fallback_text = FALLBACK_LINES[int(time.time()) % len(FALLBACK_LINES)]
     result = call_llm(
         prompt,
+        db=db,
         model=getattr(req, "model", None),
         max_tokens=getattr(req, "max_output_tokens", None) or 1000,
         fallback_text=fallback_text,
@@ -446,45 +463,8 @@ def talk_turn(req: TalkTurnRequest, db: Session = Depends(get_db)):
     # 4) idle 컨텍스트 로드
     idle_ctx, _ = _idle_context(db, int(sess["idle_id"]))
 
-    # 5) 정책 필터
-    policy_check_text = (idle_ctx + user_text).strip()
-    policy = _apply_policy_guard(db, policy_check_text, user_text)
-    if policy:
-        # 로그 저장
-        db.execute(
-            text("""
-                INSERT INTO idle_talk_messages (session_id, idle_id, user_text, assistant_text, status)
-                VALUES (:sid, :iid, :u, :a, :s)
-            """),
-            {
-                "sid": req.session_id,
-                "iid": int(sess["idle_id"]),
-                "u": user_text,
-                "a": policy["assistant_text"],
-                "s": Status.fallback.value,
-            },
-        )
-        db.commit()
-
-        # 정책 필터 시에도 글로벌 턴 카운트 증가
-        db.execute(
-            text("""
-                UPDATE psano_state
-                SET global_turn_count = COALESCE(global_turn_count, 0) + 1
-                WHERE id = 1
-            """)
-        )
-        db.commit()
-
-        return {
-            "status": Status.fallback,
-            "ui_text": policy["assistant_text"],
-            "fallback_code": policy["fallback_code"],
-            "policy_category": policy.get("policy_category"),
-            "should_end": policy.get("should_end", False),
-            "warning_text": warning_text,
-            "global_ended": False,
-        }
+    # 5) 정책 가이드 확인 (매칭 시 LLM 프롬프트에 주입)
+    policy_guide = get_policy_guide(db, user_text)
 
     # 6) 세션 메모 + 최근 턴 로드
     session_memory = trim(sess.get("idle_talk_memory") or "", MEMORY_LIMIT)
@@ -500,12 +480,14 @@ def talk_turn(req: TalkTurnRequest, db: Session = Depends(get_db)):
         recent_turns=recent_turns,
         user_text=user_text,
         visitor_name=sess.get("visitor_name") or "",
+        policy_guide=policy_guide,
     )
 
     # 8) LLM 호출
     fallback_text = FALLBACK_LINES[int(time.time()) % len(FALLBACK_LINES)]
     result = call_llm(
         prompt,
+        db=db,
         model=getattr(req, "model", None),
         max_tokens=getattr(req, "max_output_tokens", None) or 1000,
         fallback_text="",

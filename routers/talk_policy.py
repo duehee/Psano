@@ -169,6 +169,7 @@ def generate_policy_response(
 
     result = call_llm(
         prompt,
+        db=db,
         max_tokens=100,
         fallback_text=rule.fallback_message,
     )

@@ -6,7 +6,7 @@ from fastapi import HTTPException
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from routers._store import LOCK, SESSIONS
+from routers._store import LOCK, SESSIONS, GLOBAL_STATE
 from util.utils import now_kst_naive, iso
 from util.constants import ALLOWED_VALUE_KEYS, MAX_QUESTIONS
 
@@ -112,6 +112,10 @@ def end_session_core(db: Session, sid: int, reason: str) -> Dict[str, Any]:
                 text("UPDATE psano_state SET current_question = :q WHERE id = 1"),
                 {"q": new_current_q}
             )
+
+            # 메모리 캐시 동기화
+            with LOCK:
+                GLOBAL_STATE["current_question"] = new_current_q
 
         # 세션 종료 처리 (ended_at IS NULL 조건으로 race condition 방지)
         res = db.execute(

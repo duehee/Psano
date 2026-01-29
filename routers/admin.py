@@ -11,6 +11,7 @@ from database import get_db
 from util.utils import iso, now_kst_naive, get_config
 from util.constants import MAX_QUESTIONS
 from routers.persona import _generate_persona
+from routers._store import LOCK, GLOBAL_STATE
 from schemas.admin import (
     AdminSessionsResponse, AdminProgressResponse,
     AdminResetRequest, AdminResetResponse,
@@ -642,6 +643,14 @@ def admin_reset(req: AdminResetRequest, db: Session = Depends(get_db)):
                     WHERE id = 1
                 """))
 
+            # 메모리 캐시 동기화
+            with LOCK:
+                GLOBAL_STATE["phase"] = "teach"
+                GLOBAL_STATE["current_question"] = 1
+                GLOBAL_STATE["formed_at"] = None
+                GLOBAL_STATE["persona_prompt"] = None
+                GLOBAL_STATE["values_summary"] = None
+
         db.commit()
         return AdminResetResponse(
             ok=True,
@@ -669,14 +678,26 @@ def admin_set_phase(req: AdminPhaseSetRequest, db: Session = Depends(get_db)):
                 db.execute(text("UPDATE psano_state SET phase = 'teach', formed_at = NULL WHERE id = 1"))
             except Exception:
                 db.execute(text("UPDATE psano_state SET phase = 'teach' WHERE id = 1"))
+
+            # 메모리 캐시 동기화
+            with LOCK:
+                GLOBAL_STATE["phase"] = "teach"
+                GLOBAL_STATE["formed_at"] = None
         else:
+            formed_at = now_kst_naive()
             try:
                 db.execute(
                     text("UPDATE psano_state SET phase = 'talk', formed_at = :formed_at WHERE id = 1"),
-                    {"formed_at": now_kst_naive()}
+                    {"formed_at": formed_at}
                 )
             except Exception:
                 db.execute(text("UPDATE psano_state SET phase = 'talk' WHERE id = 1"))
+                formed_at = None
+
+            # 메모리 캐시 동기화
+            with LOCK:
+                GLOBAL_STATE["phase"] = "talk"
+                GLOBAL_STATE["formed_at"] = formed_at
 
         db.commit()
         return AdminPhaseSetResponse(ok=True, phase=req.phase)
@@ -696,6 +717,11 @@ def admin_set_current_question(req: AdminSetCurrentQuestionRequest, db: Session 
             {"q": int(req.current_question)}
         )
         db.commit()
+
+        # 메모리 캐시 동기화
+        with LOCK:
+            GLOBAL_STATE["current_question"] = int(req.current_question)
+
         return AdminSetCurrentQuestionResponse(ok=True, current_question=int(req.current_question))
 
     except Exception as e:

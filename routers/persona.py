@@ -10,6 +10,7 @@ from database import get_db
 from schemas.persona import PersonaGenerateRequest, PersonaGenerateResponse
 from util.utils import now_kst_naive, iso, get_config, get_prompt
 from util.constants import MAX_QUESTIONS, DEFAULT_PAIR_QUESTION_COUNT
+from routers._store import LOCK, GLOBAL_STATE
 
 router = APIRouter()
 
@@ -297,6 +298,13 @@ def _generate_persona(db: Session, *, force: bool, model: str | None, allow_unde
     )
 
     db.commit()
+
+    # 메모리 캐시 동기화
+    with LOCK:
+        GLOBAL_STATE["phase"] = "talk"
+        GLOBAL_STATE["formed_at"] = formed_at
+        GLOBAL_STATE["persona_prompt"] = persona_prompt
+        GLOBAL_STATE["values_summary"] = values_summary
 
     # warnings는 응답에 포함시키고 싶으면 pair_insights에 넣어도 됨
     if warnings:
