@@ -815,8 +815,8 @@ HTML = r"""
               <button class="btn btn-secondary" onclick="testIdleMonologue()">Idle Monologue (혼잣말)</button>
               <button class="btn btn-secondary" onclick="testIdleRandom()">Idle Random (가치축)</button>
               <select id="monologueModel" style="padding: 8px; border-radius: 6px; border: 1px solid var(--border);">
-                <option value="gpt-4o-mini">gpt-4o-mini</option>
                 <option value="gpt-4o">gpt-4o</option>
+                <option value="gpt-4o-mini">gpt-4o-mini</option>
                 <option value="gpt-4.1-mini">gpt-4.1-mini</option>
                 <option value="gpt-5-mini">gpt-5-mini</option>
                 <option value="gpt-5.2">gpt-5.2</option>
@@ -871,8 +871,8 @@ HTML = r"""
             <span class="card-title">Talk (대화)</span>
             <div style="display: flex; gap: 8px;">
               <select id="talkModel" style="padding: 6px; border-radius: 6px; border: 1px solid var(--border);">
-                <option value="gpt-4o-mini">gpt-4o-mini</option>
                 <option value="gpt-4o">gpt-4o</option>
+                <option value="gpt-4o-mini">gpt-4o-mini</option>
                 <option value="gpt-4.1-mini">gpt-4.1-mini</option>
                 <option value="gpt-5-mini">gpt-5-mini</option>
                 <option value="gpt-5.2">gpt-5.2</option>
@@ -898,6 +898,11 @@ HTML = r"""
               <div class="chat-input-bar" style="display: flex; gap: 8px;">
                 <input type="text" id="talkInput" placeholder="메시지를 입력하세요..." style="flex: 1; padding: 12px; border-radius: 8px; border: 1px solid var(--border);" onkeypress="if(event.key==='Enter') sendTalk()">
                 <button class="btn btn-primary" onclick="sendTalk()">Send</button>
+                <button class="btn btn-secondary" onclick="sendNudge()" title="사노가 먼저 말 걸기">Nudge</button>
+              </div>
+              <!-- 글로벌 예고/엔딩 표시 -->
+              <div id="globalWarningBox" style="display: none; margin-top: 12px; padding: 12px; background: #fef3c7; border-radius: 8px; color: #92400e; font-size: 13px;">
+                <strong>⚠️ 예고:</strong> <span id="globalWarningText"></span>
               </div>
             </div>
           </div>
@@ -929,6 +934,10 @@ HTML = r"""
               <div class="stat">
                 <div class="stat-value" id="admPhase">-</div>
                 <div class="stat-label">Phase</div>
+              </div>
+              <div class="stat">
+                <div class="stat-value" id="admGlobalTurn">-</div>
+                <div class="stat-label">Global Turns</div>
               </div>
             </div>
           </div>
@@ -1598,11 +1607,54 @@ HTML = r"""
       addChatMessage('assistant', data.ui_text);
       log({ endpoint: '/talk/turn', data });
 
-      if (data.should_end) {
+      // 글로벌 예고 표시
+      if (data.warning_text) {
+        document.getElementById('globalWarningBox').style.display = 'block';
+        document.getElementById('globalWarningText').textContent = data.warning_text;
+      }
+
+      // 글로벌 엔딩
+      if (data.global_ended) {
+        addChatMessage('system', '🔴 사노의 시간이 모두 끝났습니다.');
+        document.getElementById('talkInput').disabled = true;
+        toast('글로벌 엔딩 - 사노 종료', 'error');
+      } else if (data.should_end) {
         addChatMessage('system', '대화가 종료되었습니다.');
       }
     } catch (e) {
       toast(`Talk turn failed: ${e.message}`, 'error');
+      log({ error: e.message });
+    }
+    showSpinner(false);
+  }
+
+  async function sendNudge() {
+    if (!sessionId) {
+      toast('세션이 없습니다', 'error');
+      return;
+    }
+    if (!currentIdleId) {
+      toast('대화가 시작되지 않았습니다', 'error');
+      return;
+    }
+
+    showSpinner(true);
+    const model = document.getElementById('talkModel').value;
+
+    try {
+      const data = await fetchJson('/monologue/nudge', {
+        method: 'POST',
+        body: JSON.stringify({
+          session_id: sessionId,
+          model: model
+        })
+      });
+
+      addChatMessage('system', '[nudge]');
+      addChatMessage('assistant', data.nudge_text);
+      log({ endpoint: '/monologue/nudge', data });
+    } catch (e) {
+      toast(`Nudge failed: ${e.message}`, 'error');
       log({ error: e.message });
     }
     showSpinner(false);
@@ -1626,6 +1678,7 @@ HTML = r"""
       document.getElementById('admMax').textContent = data.max_questions ?? '-';
       document.getElementById('admRatio').textContent = Math.round((data.progress_ratio || 0) * 100) + '%';
       document.getElementById('admPhase').textContent = data.phase ?? '-';
+      document.getElementById('admGlobalTurn').textContent = `${data.global_turn_count ?? 0}/${data.global_turn_max ?? 365}`;
       log({ endpoint: '/admin/progress', data });
     } catch (e) {
       log({ error: e.message });
@@ -2243,8 +2296,8 @@ HTML = r"""
         <ul>
           <li><strong>Model</strong>: 사용할 GPT 모델 선택
             <ul style="margin-top:4px; font-size:12px; color:var(--muted);">
-              <li>gpt-4o-mini (빠름, 저렴) - 기본값</li>
-              <li>gpt-4o (균형)</li>
+              <li>gpt-4o (균형) - 기본값</li>
+              <li>gpt-4o-mini (빠름, 저렴)</li>
               <li>gpt-5-nano/mini (GPT-5 경량)</li>
               <li>gpt-5.2 (최신 flagship)</li>
             </ul>

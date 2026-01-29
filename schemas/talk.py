@@ -8,7 +8,7 @@ class TalkStartRequest(BaseModel):
     session_id: int = Field(..., ge=1)
     idle_id: int = Field(..., ge=1)  # 혼잣말 ID (/idle/random에서 받은 값)
 
-    model: str = "gpt-4o-mini"
+    model: str = "gpt-4o"
     max_output_tokens: Optional[int] = None
 
 
@@ -25,7 +25,7 @@ class TalkTurnRequest(BaseModel):
     session_id: int = Field(..., ge=1)
     user_text: str = Field(..., min_length=1, max_length=200)
 
-    model: str = "gpt-4o-mini"
+    model: str = "gpt-4o"
     max_output_tokens: Optional[int] = None
 
 

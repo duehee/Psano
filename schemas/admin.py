@@ -50,6 +50,8 @@ class AdminProgressResponse(BaseModel):
     answered_count: int           # current_question - 1 (formation 기준)
     max_questions: int            # 365
     progress_ratio: float         # 0~1
+    global_turn_count: int = 0    # 글로벌 대화 턴 카운트
+    global_turn_max: int = 365    # 글로벌 최대 턴
 
 class AdminResetRequest(BaseModel):
     reset_answers: bool = Field(default=False)

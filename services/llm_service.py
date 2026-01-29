@@ -18,7 +18,7 @@ from util.utils import _to_pretty
 # 설정
 LLM_TIMEOUT = 30  # 초 (GPT-5 모델은 더 오래 걸릴 수 있음)
 LLM_RETRY_COUNT = 2
-DEFAULT_MODEL = "gpt-4o-mini"
+DEFAULT_MODEL = "gpt-4o"
 
 client = OpenAI(timeout=LLM_TIMEOUT)
 
@@ -45,7 +45,7 @@ def call_llm(
 
     Args:
         prompt: 프롬프트 텍스트
-        model: 모델명 (기본: gpt-4o-mini)
+        model: 모델명 (기본: gpt-4o)
         max_tokens: 최대 토큰 수
         fallback_text: 실패 시 반환할 텍스트
 

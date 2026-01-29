@@ -564,9 +564,10 @@ def list_sessions(
 def get_progress(db: Session = Depends(get_db)):
     # 설정 로드
     max_questions = get_config(db, "max_questions", MAX_QUESTIONS)
+    global_turn_max = get_config(db, "global_turn_max", 365)
 
     st = db.execute(
-        text("SELECT phase, current_question FROM psano_state WHERE id = 1")
+        text("SELECT phase, current_question, global_turn_count FROM psano_state WHERE id = 1")
     ).mappings().first()
 
     if not st:
@@ -579,6 +580,7 @@ def get_progress(db: Session = Depends(get_db)):
     current_q = int(st["current_question"])
     answered = max_questions if phase == "talk" else max(0, min(max_questions, current_q - 1))
     ratio = float(answered) / float(max_questions) if max_questions > 0 else 0.0
+    global_turn_count = int(st.get("global_turn_count") or 0)
 
     return {
         "phase": phase,
@@ -586,6 +588,8 @@ def get_progress(db: Session = Depends(get_db)):
         "answered_count": answered,
         "max_questions": max_questions,
         "progress_ratio": ratio,
+        "global_turn_count": global_turn_count,
+        "global_turn_max": global_turn_max,
     }
 
 

@@ -5,7 +5,10 @@ from sqlalchemy import text
 
 from database import get_db
 from schemas.common import Status
-from schemas.monologue import MonologueRequest, MonologueResponse
+from schemas.monologue import (
+    MonologueRequest, MonologueResponse,
+    NudgeRequest, NudgeResponse
+)
 
 from routers.talk_policy import Action
 from services.llm_service import call_llm
@@ -170,4 +173,205 @@ def idle_monologue(req: MonologueRequest, db: Session = Depends(get_db)):
         "stage_id": int(stage.get("stage_id") or 1),
         "stage_name_kr": stage.get("stage_name_kr") or "태동기",
         "stage_name_en": stage.get("stage_name_en") or "Nascent",
+    }
+
+
+# -----------------------
+# Nudge (대화 중 혼잣말)
+# -----------------------
+
+def _load_idle(db: Session, idle_id: int):
+    """idle 혼잣말 로드"""
+    return db.execute(
+        text("""
+            SELECT id, axis_key, question_text, value
+            FROM psano_idle
+            WHERE id = :id
+        """),
+        {"id": idle_id}
+    ).mappings().first()
+
+
+def _get_recent_messages(db: Session, sid: int, limit: int = 6):
+    """idle_talk_messages에서 최근 메시지 조회 (시간순 정렬)"""
+    limit = max(2, min(int(limit or 6), 12))
+    rows = db.execute(
+        text("""
+            SELECT user_text, assistant_text
+            FROM idle_talk_messages
+            WHERE session_id = :sid
+            ORDER BY id DESC
+            LIMIT :lim
+        """),
+        {"sid": int(sid), "lim": int(limit)}
+    ).mappings().all()
+    # 최신 -> 과거 순으로 왔으니 뒤집어서 시간순으로
+    return list(rows)[::-1]
+
+
+def build_nudge_prompt(*, persona: str | None, values_summary, idle_ctx: str, recent_msgs: list, session_memory: str | None):
+    """nudge 프롬프트 생성"""
+    persona = (persona or "").strip()
+    summary_text = summary_to_text(values_summary).strip()
+    mem = (session_memory or "").strip()
+
+    convo_lines = []
+    for r in recent_msgs:
+        u = (r.get("user_text") or "").strip()
+        a = (r.get("assistant_text") or "").strip()
+
+        # nudge 로그는 user_text가 "[nudge]"일 수 있으니 표시
+        if u and u != "[nudge]":
+            convo_lines.append(f"User: {u}")
+        elif u == "[nudge]":
+            convo_lines.append(f"(nudge)")
+        if a:
+            convo_lines.append(f"Assistant: {a}")
+
+    convo = "\n".join(convo_lines).strip()
+
+    base = []
+    if persona:
+        base.append(f"[persona_prompt]\n{persona}\n")
+    if summary_text:
+        base.append(f"[values_summary]\n{summary_text}\n")
+
+    base.append(idle_ctx)
+
+    if mem:
+        base.append(f"[session_memory]\n{mem}\n")
+
+    if convo:
+        base.append(f"[recent_conversation]\n{convo}\n")
+
+    base.append(
+        f"""너는 전시 작품 '사노'다.
+지금은 대화 도중, 사용자의 반응이 잠깐 멈춘 상황이다.
+위 혼잣말과 방금까지의 대화 흐름을 살려서, 짧은 혼잣말/툭 던지는 한마디를 만든다.
+
+규칙:
+- 한국어
+- 최대 {OUTPUT_LIMIT}자
+- 문장 1~2개
+- 과장된 감정 표현 금지
+- persona_prompt의 SAFETY 규칙에 따라 민감 주제 처리
+- 사용자를 재촉하지 말 것("빨리", "왜 답 안 해" 금지)
+- 질문은 있어도 1개까지만
+
+출력은 문장만, 다른 라벨/설명 없이."""
+    )
+    return "\n".join(base).strip()
+
+
+@router.post("/nudge", response_model=NudgeResponse)
+def talk_nudge(req: NudgeRequest, db: Session = Depends(get_db)):
+    """
+    POST /monologue/nudge
+    대화 중 사용자 반응이 없을 때 사노가 툭 던지는 한마디
+    """
+    sid = int(req.session_id)
+
+    # 1) psano_state (persona/summary)
+    st = db.execute(
+        text("""
+            SELECT persona_prompt, values_summary
+            FROM psano_state
+            WHERE id = 1
+        """)
+    ).mappings().first()
+
+    persona = (st or {}).get("persona_prompt")
+    values_summary = (st or {}).get("values_summary")
+
+    # 2) 세션 체크 (talk 시작 했는지)
+    sess = db.execute(
+        text("""
+            SELECT id, ended_at, idle_id, idle_talk_memory
+            FROM sessions
+            WHERE id = :sid
+        """),
+        {"sid": sid}
+    ).mappings().first()
+
+    if not sess:
+        raise HTTPException(status_code=404, detail="session not found")
+    if sess.get("ended_at") is not None:
+        raise HTTPException(status_code=409, detail="session already ended")
+
+    idle_id = sess.get("idle_id")
+    if idle_id in (None, "", 0):
+        raise HTTPException(status_code=409, detail="talk not started for this session. call POST /talk/start first.")
+
+    idle_id = int(idle_id)
+    session_memory = sess.get("idle_talk_memory")
+
+    # 3) idle 컨텍스트 로드
+    idle = _load_idle(db, idle_id)
+    if not idle:
+        raise HTTPException(status_code=404, detail=f"idle not found: {idle_id}")
+
+    monologue = (idle.get("question_text") or "").strip()
+    axis_key = (idle.get("axis_key") or "").strip()
+    idle_ctx = f"[idle_monologue]\n- axis: {axis_key}\n- text: {monologue}\n"
+
+    # 4) 최근 대화 조회
+    recent_msgs = _get_recent_messages(db, sid, req.recent_messages or 6)
+
+    # 5) 프롬프트 생성
+    prompt = build_nudge_prompt(
+        persona=persona,
+        values_summary=values_summary,
+        idle_ctx=idle_ctx,
+        recent_msgs=recent_msgs,
+        session_memory=session_memory,
+    )
+
+    # 6) 정책 필터
+    user_texts = "\n".join([m.get("user_text", "") for m in recent_msgs if m])
+    policy = _apply_policy_guard(db, idle_ctx + "\n" + user_texts, user_texts)
+    if policy:
+        nudge_text = policy["assistant_text"]
+        fallback_code = policy["fallback_code"]
+        status = Status.fallback
+    else:
+        # LLM 호출
+        fallback_text = FALLBACK_LINES[int(time.time()) % len(FALLBACK_LINES)]
+        result = call_llm(
+            prompt,
+            model=req.model,
+            max_tokens=req.max_output_tokens or 800,
+            fallback_text=fallback_text,
+        )
+
+        if result.success:
+            status = Status.ok
+            nudge_text = trim(result.content, OUTPUT_LIMIT)
+            fallback_code = None
+        else:
+            status = Status.fallback
+            nudge_text = trim(result.content, OUTPUT_LIMIT)
+            fallback_code = result.fallback_code
+
+    # 7) idle_talk_messages 저장 (nudge 마킹)
+    db.execute(
+        text("""
+            INSERT INTO idle_talk_messages (session_id, idle_id, user_text, assistant_text, status)
+            VALUES (:sid, :iid, :u, :a, :s)
+        """),
+        {
+            "sid": sid,
+            "iid": idle_id,
+            "u": "[nudge]",
+            "a": nudge_text,
+            "s": status.value,
+        }
+    )
+    db.commit()
+
+    return {
+        "status": status,
+        "nudge_text": nudge_text,
+        "fallback_code": fallback_code,
+        "session_id": sid,
+        "idle_id": idle_id,
     }
