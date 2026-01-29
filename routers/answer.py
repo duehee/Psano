@@ -7,26 +7,13 @@ from database import get_db
 from schemas.answer import AnswerRequest, AnswerResponse
 from services.llm_service import call_llm
 from util.utils import load_growth_stage, get_config, get_prompt
+from util.constants import ALLOWED_VALUE_KEYS, DEFAULT_SESSION_QUESTION_LIMIT
 
 router = APIRouter()
 
 # 하드코딩 fallback (DB 없을 때)
-_DEFAULT_SESSION_LIMIT = 5
 _DEFAULT_FALLBACK_REACTIONS = ["흠, 그렇구나.", "알겠어.", "오케이."]
 _DEFAULT_FALLBACK_LAST = "좋아. 오늘은 여기까지 해보자."
-
-ALLOWED_VALUE_KEYS = {
-    "self_direction",
-    "conformity",
-    "stimulation",
-    "security",
-    "hedonism",
-    "tradition",
-    "achievement",
-    "benevolence",
-    "power",
-    "universalism",
-}
 
 
 def _build_style_guide(db: Session, stage) -> str:
@@ -69,7 +56,7 @@ def _reaction_text_gpt(
 ) -> str:
     """유저 답변에 GPT가 성장단계 스타일로 짧게 반응"""
     # 설정 로드
-    session_limit = get_config(db, "session_question_limit", _DEFAULT_SESSION_LIMIT)
+    session_limit = get_config(db, "session_question_limit", DEFAULT_SESSION_QUESTION_LIMIT)
     fallback_reactions = get_config(db, "fallback_reactions", _DEFAULT_FALLBACK_REACTIONS)
     fallback_last = get_config(db, "fallback_reaction_last", _DEFAULT_FALLBACK_LAST)
     reaction_max_tokens = get_config(db, "reaction_max_tokens", 50)
@@ -147,7 +134,7 @@ def post_answer(req: AnswerRequest, db: Session = Depends(get_db)):
     choice = req.choice
 
     # 설정 로드
-    session_limit = get_config(db, "session_question_limit", _DEFAULT_SESSION_LIMIT)
+    session_limit = get_config(db, "session_question_limit", DEFAULT_SESSION_QUESTION_LIMIT)
 
     # 0) 세션 존재/종료 체크 + start_question_id 조회
     ses = db.execute(

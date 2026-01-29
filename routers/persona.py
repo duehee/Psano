@@ -9,12 +9,10 @@ from sqlalchemy import text
 from database import get_db
 from schemas.persona import PersonaGenerateRequest, PersonaGenerateResponse
 from util.utils import now_kst_naive, iso, get_config, get_prompt
+from util.constants import MAX_QUESTIONS, DEFAULT_PAIR_QUESTION_COUNT
 
 router = APIRouter()
 
-# 하드코딩 fallback (DB 없을 때)
-_DEFAULT_TOTAL_QUESTIONS = 365
-_DEFAULT_PAIR_QUESTION_COUNT = 76
 
 # 네 psano_personality 컬럼(스크린샷 기준)
 PAIRS: List[Dict[str, str]] = [
@@ -140,8 +138,8 @@ def _build_values_summary(
 
 def _generate_persona(db: Session, *, force: bool, model: str | None, allow_under_365: bool) -> PersonaGenerateResponse:
     # 설정값 로드
-    total_questions = get_config(db, "max_questions", _DEFAULT_TOTAL_QUESTIONS)
-    pair_count = get_config(db, "pair_question_count", _DEFAULT_PAIR_QUESTION_COUNT)
+    total_questions = get_config(db, "max_questions", MAX_QUESTIONS)
+    pair_count = get_config(db, "pair_question_count", DEFAULT_PAIR_QUESTION_COUNT)
 
     # 강도 임계값 로드
     thresholds = {
@@ -184,7 +182,7 @@ def _generate_persona(db: Session, *, force: bool, model: str | None, allow_unde
         answered_total = total_questions
 
     # 실전 /persona/generate 에서는 365 미만이면 막음(관리자 테스트는 allow_under_365=True 가능)
-    if (answered_total < total_questions) and (not 365) and (not force):
+    if (answered_total < total_questions) and (not allow_under_365) and (not force):
         raise HTTPException(
             status_code=409,
             detail=f"not ready: answered_total={answered_total} (need {total_questions})"

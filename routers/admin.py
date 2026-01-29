@@ -9,6 +9,7 @@ from sqlalchemy import text
 
 from database import get_db
 from util.utils import iso, now_kst_naive, get_config
+from util.constants import MAX_QUESTIONS
 from routers.persona import _generate_persona
 from schemas.admin import (
     AdminSessionsResponse, AdminProgressResponse,
@@ -27,9 +28,6 @@ except ImportError:
 
 
 router = APIRouter()
-
-# 하드코딩 fallback (DB 없을 때)
-_DEFAULT_MAX_QUESTIONS = 365
 
 
 # =========================
@@ -565,7 +563,7 @@ def list_sessions(
 @router.get("/progress", response_model=AdminProgressResponse)
 def get_progress(db: Session = Depends(get_db)):
     # 설정 로드
-    max_questions = get_config(db, "max_questions", _DEFAULT_MAX_QUESTIONS)
+    max_questions = get_config(db, "max_questions", MAX_QUESTIONS)
 
     st = db.execute(
         text("SELECT phase, current_question FROM psano_state WHERE id = 1")
@@ -611,7 +609,7 @@ def admin_reset(req: AdminResetRequest, db: Session = Depends(get_db)):
 
         if req.reset_sessions:
             try:
-                _reset_table("talk_messages")
+                _reset_table("idle_talk_messages")
             except Exception:
                 pass
             _reset_table("sessions")

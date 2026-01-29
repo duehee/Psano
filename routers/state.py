@@ -4,23 +4,11 @@ from sqlalchemy import text
 
 from schemas.state import StateResponse
 from database import get_db
+from util.constants import VALUE_KEYS_ORDERED, TALK_UNLOCK_THRESHOLD
 
 router = APIRouter()
 
-VALUE_KEYS = [
-    "self_direction",
-    "conformity",
-    "stimulation",
-    "security",
-    "hedonism",
-    "tradition",
-    "achievement",
-    "benevolence",
-    "power",
-    "universalism",
-]
-
-TALK_UNLOCK_THRESHOLD = 365
+VALUE_KEYS = VALUE_KEYS_ORDERED
 
 @router.get("", response_model=StateResponse)
 def get_state(db: Session = Depends(get_db)):

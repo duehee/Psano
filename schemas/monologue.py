@@ -18,19 +18,3 @@ class MonologueResponse(BaseModel):
     stage_id: int
     stage_name_kr: str
     stage_name_en: str
-
-class NudgeRequest(BaseModel):
-    session_id: int
-
-    model: str = "gpt-4o-mini"
-    max_output_tokens: Optional[int] = None
-    recent_messages: Optional[int] = None
-
-
-class NudgeResponse(BaseModel):
-    status: Status
-    monologue_text: str
-    fallback_code: Optional[str] = None
-
-    session_id: int
-    topic_id: int

@@ -8,9 +8,8 @@ import time
 
 from sqlalchemy.orm import Session
 from sqlalchemy import text
-from openai import OpenAI
 
-client = OpenAI()
+from services.llm_service import call_llm
 
 class Action(str, Enum):
     REDIRECT = "redirect"
@@ -168,17 +167,14 @@ def generate_policy_response(
 
 사노의 응답:"""
 
-    try:
-        resp = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=100,
-        )
-        response_text = (resp.choices[0].message.content or "").strip()
-        if response_text:
-            return (response_text[:200], rule.should_end)
-    except Exception:
-        pass
+    result = call_llm(
+        prompt,
+        max_tokens=100,
+        fallback_text=rule.fallback_message,
+    )
+
+    if result.success and result.content:
+        return (result.content[:200], rule.should_end)
 
     # fallback
     return (rule.fallback_message, rule.should_end)

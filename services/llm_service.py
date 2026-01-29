@@ -7,12 +7,13 @@
 from __future__ import annotations
 
 import time
-import json
-import logging  # ✅ 추가
+import logging
 from dataclasses import dataclass
 from typing import Optional
 
 from openai import OpenAI
+
+from util.utils import _to_pretty
 
 # 설정
 LLM_TIMEOUT = 30  # 초 (GPT-5 모델은 더 오래 걸릴 수 있음)
@@ -22,31 +23,6 @@ DEFAULT_MODEL = "gpt-4o-mini"
 client = OpenAI(timeout=LLM_TIMEOUT)
 
 _llm_raw_logger = logging.getLogger("psano.llm_raw")
-
-
-def _to_pretty(obj) -> str:
-    """
-    OpenAI 응답 객체/요청 payload를 보기 좋게 문자열로 변환
-    - resp.model_dump() 가능하면 JSON pretty
-    - 아니면 str(obj)
-    """
-    if obj is None:
-        return "null"
-
-    if hasattr(obj, "model_dump"):
-        try:
-            return json.dumps(obj.model_dump(), ensure_ascii=False, indent=2, default=str)
-        except Exception:
-            pass
-
-    # messages 같은 dict/list도 pretty
-    if isinstance(obj, (dict, list)):
-        try:
-            return json.dumps(obj, ensure_ascii=False, indent=2, default=str)
-        except Exception:
-            return str(obj)
-
-    return str(obj)
 
 
 @dataclass

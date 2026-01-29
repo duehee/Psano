@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from routers._store import LOCK, SESSIONS
 from util.utils import now_kst_naive, iso
+from util.constants import ALLOWED_VALUE_KEYS, MAX_QUESTIONS
 
 
 def end_session_core(db: Session, sid: int, reason: str) -> Dict[str, Any]:
@@ -76,11 +77,11 @@ def end_session_core(db: Session, sid: int, reason: str) -> Dict[str, Any]:
                 {"sid": sid}
             ).mappings().all()
 
-            # 2) psano_personality 업데이트
+            # 2) psano_personality 업데이트 (SQL Injection 방지: whitelist 검증)
             for ans in answers:
                 col = ans["chosen_value_key"]
                 cnt = int(ans["cnt"])
-                if col and cnt > 0:
+                if col and cnt > 0 and col in ALLOWED_VALUE_KEYS:
                     db.execute(
                         text(f"UPDATE psano_personality SET `{col}` = `{col}` + :cnt WHERE id = 1"),
                         {"cnt": cnt}
@@ -105,7 +106,7 @@ def end_session_core(db: Session, sid: int, reason: str) -> Dict[str, Any]:
                 {"next_start": next_start}
             ).mappings().first()
 
-            new_current_q = int(next_q["id"]) if next_q else 381  # 없으면 형성 완료
+            new_current_q = int(next_q["id"]) if next_q else (MAX_QUESTIONS + 1)  # 없으면 형성 완료
 
             db.execute(
                 text("UPDATE psano_state SET current_question = :q WHERE id = 1"),

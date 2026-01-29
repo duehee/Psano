@@ -14,10 +14,13 @@ class Session(Base):
     started_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     ended_at = Column(DateTime, nullable=True)
 
-    topic_id = Column(Integer, nullable=True)
-    talk_memory = Column(Text, nullable=True)
-    turn_count = Column(Integer, default=0, nullable=False)
+    end_reason = Column(String(50), nullable=True)
+    start_question_id = Column(Integer, nullable=True)
+
+    # idle-based talk
+    idle_id = Column(Integer, nullable=True)
+    idle_talk_memory = Column(Text, nullable=True)
+    idle_turn_count = Column(Integer, default=0, nullable=False)
 
     # 관계
     answers = relationship("Answer", back_populates="session", cascade="all, delete-orphan")
-    talk_messages = relationship("TalkMessage", back_populates="session", cascade="all, delete-orphan")

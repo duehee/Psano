@@ -5,12 +5,9 @@ from sqlalchemy import text
 from database import get_db
 from schemas.question import QuestionResponse
 from util.utils import get_config
+from util.constants import MAX_QUESTIONS, DEFAULT_SESSION_QUESTION_LIMIT
 
 router = APIRouter()
-
-# 하드코딩 fallback (DB 없을 때)
-_DEFAULT_SESSION_LIMIT = 5
-_DEFAULT_MAX_QUESTIONS = 365
 
 @router.get("/current", response_model=QuestionResponse)
 def get_current_question(
@@ -18,8 +15,8 @@ def get_current_question(
     db: Session = Depends(get_db),
 ):
     # 설정 로드
-    session_limit = get_config(db, "session_question_limit", _DEFAULT_SESSION_LIMIT)
-    max_questions = get_config(db, "max_questions", _DEFAULT_MAX_QUESTIONS)
+    session_limit = get_config(db, "session_question_limit", DEFAULT_SESSION_QUESTION_LIMIT)
+    max_questions = get_config(db, "max_questions", MAX_QUESTIONS)
 
     # 0) 세션 유효성 + start_question_id 조회
     ses = db.execute(

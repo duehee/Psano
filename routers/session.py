@@ -21,7 +21,7 @@ def _read_session_row(db: Session, sid: int):
     return db.execute(
         text("""
             SELECT id, visitor_name, started_at, ended_at, end_reason,
-                   topic_id, talk_memory, turn_count, start_question_id
+                   idle_id, idle_talk_memory, idle_turn_count, start_question_id
             FROM sessions
             WHERE id = :sid
         """),
@@ -73,9 +73,9 @@ def start_session(req: SessionStartRequest, db: Session = Depends(get_db)):
             "end_reason": None,
             "start_question_id": start_question_id,  # 타임아웃 롤백용
             # talk 전용은 "아직 시작 안 함" 상태로 둠
-            "topic_id": None,
-            "talk_memory": None,
-            "turn_count": 0,
+            "idle_id": None,
+            "idle_talk_memory": None,
+            "idle_turn_count": 0,
         }
 
         return {
@@ -106,12 +106,12 @@ def get_session(session_id: int, db: Session = Depends(get_db)):
                 "ended_at": iso(sess.get("ended_at")),
                 "end_reason": sess.get("end_reason"),
                 # talk 전용(없으면 None/0)
-                "topic_id": sess.get("topic_id"),
-                "talk_memory": sess.get("talk_memory"),
-                "turn_count": sess.get("turn_count", 0),
+                "idle_id": sess.get("idle_id"),
+                "idle_talk_memory": sess.get("idle_talk_memory"),
+                "idle_turn_count": sess.get("idle_turn_count", 0),
             }
 
-    # 2) DB fallback (optional 컬럼 안전)
+    # 2) DB fallback
     row = _read_session_row(db, sid)
     if not row:
         raise HTTPException(status_code=404, detail="session not found")
@@ -123,7 +123,7 @@ def get_session(session_id: int, db: Session = Depends(get_db)):
         "started_at": iso(row.get("started_at")),
         "ended_at": iso(ended_at) if ended_at else None,
         "end_reason": row.get("end_reason"),
-        "topic_id": row.get("topic_id"),
-        "talk_memory": row.get("talk_memory"),
-        "turn_count": int(row.get("turn_count") or 0),
+        "idle_id": row.get("idle_id"),
+        "idle_talk_memory": row.get("idle_talk_memory"),
+        "idle_turn_count": int(row.get("idle_turn_count") or 0),
     }

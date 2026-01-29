@@ -573,33 +573,19 @@ HTML = r"""
       <div class="status" id="teachStatus"></div>
     </div>
 
-    <!-- TALK Panel -->
+    <!-- TALK Panel (Deprecated) -->
     <div class="panel" id="talkPanel">
-      <div class="card chat-container">
-        <div class="topic-selector">
-          <select id="topicSelect">
-            <option value="1">주제 1</option>
-            <option value="2">주제 2</option>
-            <option value="3">주제 3</option>
-          </select>
-          <button class="btn btn-secondary" onclick="startTalk()">대화 시작</button>
-        </div>
-
-        <div class="chat-messages" id="chatMessages">
-          <div class="empty-state" id="talkEmpty">
-            <div class="icon">💬</div>
-            <h3>대화를 시작해보세요</h3>
-            <p>주제를 선택하고 대화 시작 버튼을 누르세요</p>
-          </div>
-        </div>
-
-        <div class="chat-input">
-          <textarea id="chatInput" placeholder="메시지를 입력하세요..." rows="1" disabled></textarea>
-          <button class="btn btn-primary" onclick="sendMessage()" id="sendBtn" disabled>전송</button>
-        </div>
+      <div class="card" style="text-align: center; padding: 48px 24px;">
+        <div style="font-size: 48px; margin-bottom: 16px;">💬</div>
+        <h3 style="margin-bottom: 12px;">Talk 기능 안내</h3>
+        <p style="color: var(--muted); margin-bottom: 24px;">
+          대화 기능은 <strong>/ui</strong> 페이지에서 이용해주세요.<br>
+          혼잣말(Idle) 기반의 자연스러운 대화가 가능합니다.
+        </p>
+        <a href="/ui" class="btn btn-primary" style="display: inline-block; text-decoration: none;">
+          /ui 페이지로 이동
+        </a>
       </div>
-
-      <div class="status" id="talkStatus"></div>
     </div>
   </div>
 
@@ -607,8 +593,6 @@ HTML = r"""
   // State
   let sessionId = null;
   let currentQuestionId = null;
-  let topicId = null;
-  let talkStarted = false;
 
   // Timeout timer (5분)
   let timeoutTimer = null;
@@ -633,14 +617,6 @@ HTML = r"""
   const teachStatus = document.getElementById('teachStatus');
   const timeoutBar = document.getElementById('timeoutBar');
   const timeoutProgress = document.getElementById('timeoutProgress');
-
-  // Talk elements
-  const chatMessages = document.getElementById('chatMessages');
-  const chatInput = document.getElementById('chatInput');
-  const sendBtn = document.getElementById('sendBtn');
-  const topicSelect = document.getElementById('topicSelect');
-  const talkEmpty = document.getElementById('talkEmpty');
-  const talkStatus = document.getElementById('talkStatus');
 
   // Utils
   async function fetchJson(url, options = {}) {
@@ -724,8 +700,6 @@ HTML = r"""
     // Reset state
     sessionId = null;
     currentQuestionId = null;
-    talkStarted = false;
-    topicId = null;
 
     sessionBtn.textContent = '시작';
     sessionBtn.classList.remove('btn-danger');
@@ -738,12 +712,6 @@ HTML = r"""
     questionContent.style.display = 'none';
     reactionBox.classList.remove('show');
     timeoutBar.style.display = 'none';
-
-    // Reset talk panel
-    chatMessages.innerHTML = '';
-    talkEmpty.style.display = 'block';
-    chatInput.disabled = true;
-    sendBtn.disabled = true;
 
     teachStatus.textContent = reason === 'timeout' ? '시간 초과로 세션이 종료되었습니다' : '';
   }
@@ -862,121 +830,8 @@ HTML = r"""
     }
   }
 
-  // TALK: Load topics
-  async function loadTopics() {
-    try {
-      const data = await fetchJson('/talk/topics');
-      const topics = data.topics || [];
-
-      topicSelect.innerHTML = '';
-      topics.forEach(t => {
-        const opt = document.createElement('option');
-        opt.value = t.id;
-        opt.textContent = `${t.id}. ${t.title}`;
-        topicSelect.appendChild(opt);
-      });
-    } catch (e) {
-      console.error('Load topics error:', e);
-    }
-  }
-
-  // TALK: Start
-  async function startTalk() {
-    if (!sessionId) {
-      talkStatus.textContent = '먼저 세션을 시작해주세요';
-      talkStatus.classList.add('error');
-      return;
-    }
-
-    topicId = parseInt(topicSelect.value);
-
-    try {
-      const data = await fetchJson('/talk/start', {
-        method: 'POST',
-        body: JSON.stringify({
-          session_id: sessionId,
-          topic_id: topicId
-        })
-      });
-
-      talkStarted = true;
-      talkEmpty.style.display = 'none';
-      chatInput.disabled = false;
-      sendBtn.disabled = false;
-      talkStatus.textContent = '';
-      talkStatus.classList.remove('error');
-
-      // Show first message
-      const firstMsg = data.assistant_first_text || data.ui_text || '';
-      if (firstMsg) {
-        addMessage('assistant', firstMsg);
-      }
-
-    } catch (e) {
-      talkStatus.textContent = `오류: ${e.message}`;
-      talkStatus.classList.add('error');
-    }
-  }
-
-  // TALK: Send message
-  async function sendMessage() {
-    const text = chatInput.value.trim();
-    if (!text || !sessionId || !talkStarted) return;
-
-    addMessage('user', text);
-    chatInput.value = '';
-
-    // Show typing indicator
-    const typingEl = addMessage('assistant typing', '');
-    typingEl.innerHTML = '<div class="typing-dots"><span></span><span></span><span></span></div>';
-
-    try {
-      const data = await fetchJson('/talk/turn', {
-        method: 'POST',
-        body: JSON.stringify({
-          session_id: sessionId,
-          topic_id: topicId,
-          user_text: text
-        })
-      });
-
-      // Replace typing with response
-      const response = data.ui_text || data.assistant_text || '';
-      typingEl.classList.remove('typing');
-      typingEl.textContent = response;
-
-    } catch (e) {
-      typingEl.remove();
-      talkStatus.textContent = `오류: ${e.message}`;
-      talkStatus.classList.add('error');
-    }
-  }
-
-  function addMessage(type, text) {
-    const msg = document.createElement('div');
-    msg.className = `message ${type}`;
-    msg.textContent = text;
-    chatMessages.appendChild(msg);
-    chatMessages.scrollTop = chatMessages.scrollHeight;
-    return msg;
-  }
-
-  // Chat input events
-  chatInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      sendMessage();
-    }
-  });
-
-  // Auto-resize textarea
-  chatInput.addEventListener('input', () => {
-    chatInput.style.height = 'auto';
-    chatInput.style.height = Math.min(chatInput.scrollHeight, 120) + 'px';
-  });
-
-  // Init
-  loadTopics();
+  // Talk 기능은 /ui 페이지로 이동되었습니다.
+  // Talk section now shows a redirect message to /ui
 </script>
 
 </body>
