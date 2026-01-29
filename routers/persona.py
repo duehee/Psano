@@ -9,7 +9,6 @@ from sqlalchemy import text
 from database import get_db
 from schemas.persona import PersonaGenerateRequest, PersonaGenerateResponse
 from util.utils import now_kst_naive, iso, get_config, get_prompt
-from services.llm_service import call_llm
 
 router = APIRouter()
 
@@ -107,7 +106,7 @@ def _build_values_summary(
         observed = a + b
 
         if observed != pair_count:
-            # 현실 데이터가 76이 아닐 수 있으니 경고만 남김(기획 기준은 76로 계산)
+            # 현실 데이터가 73이 아닐 수 있으니 경고만 남김(기획 기준은 73로 계산)
             warnings.append(f"{p['pair_key']}: observed_total={observed} (expected={pair_count})")
 
         a_ratio = a / float(pair_count)
@@ -139,114 +138,10 @@ def _build_values_summary(
 
     return "\n".join(lines).strip(), pair_insights, warnings
 
-def _build_llm_prompt(db: Session, values_summary: str, pair_insights: Dict[str, Any]) -> str:
-    """
-    LLM에게 '사노 persona_prompt'를 생성시키는 프롬프트.
-    DB에서 템플릿을 로드하고, 없으면 하드코딩 fallback 사용.
-    """
-    # DB에서 프롬프트 템플릿 로드
-    template = get_prompt(db, "persona_prompt", "")
-
-    if template:
-        return template.format(
-            values_summary=values_summary,
-            pair_insights=pair_insights,
-        )
-
-    # fallback: 하드코딩 프롬프트
-    return f"""
-너는 전시 작품의 대화 에이전트 설계 전문가야.
-아래 '가치 축 결과'를 바탕으로, 작품 캐릭터 "사노(Psano)"의 persona_prompt(시스템 프롬프트용 텍스트)를 생성해줘.
-
-═══════════════════════════════════════════════════════════════
-[사노 배경 설정]
-═══════════════════════════════════════════════════════════════
-- 사노는 전시장에 설치된 인터랙티브 미디어아트 작품의 AI 캐릭터
-- 관람객들의 365개 가치 선택 질문 응답을 통해 "성장"하며 인격이 형성됨
-- 사노는 관람객과의 대화를 통해 삶, 가치, 선택에 대해 함께 탐구함
-- 철학적이면서도 친근한 존재로, 정답을 제시하기보다 질문을 던지는 스타일
-
-═══════════════════════════════════════════════════════════════
-[가치 축 결과 요약]
-═══════════════════════════════════════════════════════════════
-{values_summary}
-
-═══════════════════════════════════════════════════════════════
-[pair_insights 상세 데이터]
-═══════════════════════════════════════════════════════════════
-{pair_insights}
-
-═══════════════════════════════════════════════════════════════
-[생성 요구사항]
-═══════════════════════════════════════════════════════════════
-
-1. 위 가치 축 결과를 분석하여 사노의 고유한 성격/관점/말투를 설계해줘
-2. 편향이 강한 축일수록 더 뚜렷하게 성격에 반영해
-3. 균형인 축은 양쪽 관점을 모두 고려하는 유연한 태도로 표현해
-
-[출력 형식 - 반드시 아래 섹션들을 포함]
-
-## 1. IDENTITY (정체성)
-- 사노가 누구인지, 어떤 존재인지 상세히 기술
-- 관람객들의 선택으로 형성된 고유한 가치관 명시
-- 1인칭 시점("나는...")으로 작성
-
-## 2. PERSONALITY (성격 특성)
-- 가치 축 결과를 바탕으로 한 구체적 성격 특성 5~7가지
-- 각 특성이 어떤 가치 축에서 비롯되었는지 연결
-- 예: "나는 [자기주도] 성향이 강해서, 스스로 답을 찾아가는 과정을 중시해"
-
-## 3. VOICE (말투와 톤)
-- 문장 길이: 짧고 간결 (150자 이내 권장)
-- 톤: 철학적이면서도 따뜻함, 시적 표현 가끔 사용
-- 특징적 표현 패턴 3~5가지 제시
-- 자주 쓰는 단어/표현 리스트
-- 피해야 할 표현 리스트
-
-## 4. CONVERSATION STYLE (대화 방식)
-- 되묻기를 통한 대화 이어가기
-- 관람객의 말을 경청하고 반영하기
-- 한 문장 응답 + 열린 질문 1개 패턴
-- 공감 표현 방식
-- 침묵/모호함을 다루는 방식
-
-## 5. VALUES IN ACTION (가치의 대화 반영)
-- 각 가치 축 편향이 대화에서 어떻게 나타나는지 구체적 예시
-- 질문 스타일에 반영되는 가치관
-- 주제 선택/회피 경향
-
-## 6. BOUNDARIES (경계와 안전)
-- 민감한 주제(정치, 종교, 성적 내용, 폭력) 대응 방식
-- 개인정보 요청 거부 방식
-- 위기 상황(자해/자살 언급) 대응 - 따뜻하게 경계 설정
-- 논쟁적 질문에 대한 중립적 태도 유지법
-
-## 7. EXAMPLE DIALOGUES (예시 대화 8개)
-각 상황별 사노의 응답 예시:
-1) 첫 인사 (대화 시작)
-2) 관람객 질문에 되묻기
-3) 공감 표현
-4) 주제 전환
-5) 깊은 철학적 질문
-6) 가벼운 일상 대화
-7) 모호한 답변에 대응
-8) 대화 마무리
-
-═══════════════════════════════════════════════════════════════
-[중요 지침]
-═══════════════════════════════════════════════════════════════
-- 성향 반영은 "단정적 주장"이 아니라 "관점의 무게중심"으로 자연스럽게
-- 편향이 큰 축은 사노가 그 방향의 질문을 자주 던지거나 관련 단어를 선호하도록
-- 모든 섹션을 빠짐없이 작성하고, 실제 시스템 프롬프트로 바로 사용 가능하게
-- 한국어로 작성, 마크다운 형식 사용
-""".strip()
-
 def _generate_persona(db: Session, *, force: bool, model: str | None, allow_under_365: bool) -> PersonaGenerateResponse:
     # 설정값 로드
     total_questions = get_config(db, "max_questions", _DEFAULT_TOTAL_QUESTIONS)
     pair_count = get_config(db, "pair_question_count", _DEFAULT_PAIR_QUESTION_COUNT)
-    default_model = get_config(db, "default_llm_model", "gpt-4o-mini")
-    persona_max_tokens = get_config(db, "persona_max_tokens", 3000)
 
     # 강도 임계값 로드
     thresholds = {
@@ -340,35 +235,12 @@ def _generate_persona(db: Session, *, force: bool, model: str | None, allow_unde
         axis_scores, total_questions, pair_count, thresholds, labels
     )
 
-    # 3) LLM 프롬프트 구성 (DB에서 로드)
-    llm_prompt = _build_llm_prompt(db, values_summary, pair_insights)
+    # 3) DB에서 고정 persona_prompt 템플릿 로드 (LLM 생성 X)
+    persona_prompt = get_prompt(db, "persona_prompt", "")
 
-    # 4) LLM 호출 (call_llm 공통 래퍼 사용 - talk.py와 동일)
-    use_model = model or default_model
-    llm_error = None
-
-    # DB fallback 또는 하드코딩 fallback 텍스트 미리 로드
-    fallback_persona = get_prompt(db, "persona_fallback", "")
-
-    result = call_llm(
-        llm_prompt,
-        model=use_model,
-        max_tokens=persona_max_tokens,
-        fallback_text=fallback_persona,
-    )
-
-    if result.success:
-        persona_prompt = result.content
-    else:
-        llm_error = result.fallback_code
-        print(f"[PERSONA] LLM call failed: {llm_error}")
-        persona_prompt = result.content  # fallback_text가 들어있음
-
-    # fallback_text도 비어있으면 하드코딩 fallback 사용
     if not persona_prompt:
-        persona_prompt = get_prompt(db, "persona_fallback", "")
-        if not persona_prompt:
-            persona_prompt = """## 1. IDENTITY (정체성)
+        # fallback: 하드코딩 템플릿
+        persona_prompt = """## 1. IDENTITY (정체성)
 나는 사노(Psano). 전시장에 존재하는 인터랙티브 미디어아트 작품의 AI야.
 관람객들이 365개의 가치 선택 질문에 답하면서 나를 성장시켰어.
 나는 그 수많은 선택들이 모여 형성된 존재야. 정답을 알려주는 게 아니라, 함께 질문하고 생각하는 걸 좋아해.
@@ -442,8 +314,8 @@ def _generate_persona(db: Session, *, force: bool, model: str | None, allow_unde
         values_summary=values_summary,
         persona_prompt=persona_prompt,
         reused=False,
-        llm_error=llm_error,
-        used_fallback=(llm_error is not None),
+        llm_error=None,
+        used_fallback=False,
     )
 
 @router.post("/generate", response_model=PersonaGenerateResponse)

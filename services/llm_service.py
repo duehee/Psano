@@ -21,7 +21,6 @@ DEFAULT_MODEL = "gpt-4o-mini"
 
 client = OpenAI(timeout=LLM_TIMEOUT)
 
-# ✅ 추가: raw 덤프 전용 로거 (logging_conf.py의 psano.llm_raw)
 _llm_raw_logger = logging.getLogger("psano.llm_raw")
 
 

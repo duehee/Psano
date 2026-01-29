@@ -591,13 +591,13 @@ def _build_idle_start_prompt(db: Session, *, persona: str | None, summary, idle_
     summary_text = summary_to_text(summary).strip()
     visitor_name = (visitor_name or "").strip()
 
-    template = get_prompt(db, "idle_talk_start_prompt", "")
+    template = get_prompt(db, "talk_start_prompt", "")
 
     if template:
         return template.format(
             persona=persona,
             values_summary=summary_text,
-            idle_ctx=idle_ctx,
+            topic_ctx=idle_ctx,  # idle_ctx를 topic_ctx 자리에
             visitor_name=visitor_name,
             output_limit=OUTPUT_LIMIT,
         )
@@ -660,7 +660,7 @@ def _build_idle_turn_prompt(
     mem = trim(session_memory or "", MEMORY_LIMIT)
     recent = (recent_turns or "").strip()
 
-    template = get_prompt(db, "idle_talk_turn_prompt", "")
+    template = get_prompt(db, "talk_turn_prompt", "")
 
     if template:
         return template.format(
