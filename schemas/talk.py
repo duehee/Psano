@@ -36,6 +36,9 @@ class TalkTurnResponse(BaseModel):
     fallback_code: Optional[str] = None
     policy_category: Optional[str] = None
     should_end: bool = False
+    # 글로벌 엔딩 관련
+    warning_text: Optional[str] = None  # 예고 메시지 (355~364)
+    global_ended: bool = False  # 글로벌 엔딩 (365)
 
 
 class TalkEndRequest(BaseModel):

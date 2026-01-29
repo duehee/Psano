@@ -9,6 +9,10 @@ MAX_QUESTIONS = 365
 # 대화기 해금 임계값 (answered_total >= 이 값이면 talk 가능)
 TALK_UNLOCK_THRESHOLD = MAX_QUESTIONS
 
+# 글로벌 대화 턴 설정 (기본값, psano_config에서 오버라이드 가능)
+DEFAULT_GLOBAL_TURN_MAX = 365
+DEFAULT_GLOBAL_WARNING_START = 355
+
 # 세션당 질문 수 (기본값)
 DEFAULT_SESSION_QUESTION_LIMIT = 5
 

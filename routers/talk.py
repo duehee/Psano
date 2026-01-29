@@ -3,7 +3,10 @@ from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from services.session_service import end_session_core
-from util.utils import trim, summary_to_text, get_prompt
+from util.utils import trim, summary_to_text, get_prompt, get_config
+from util.constants import DEFAULT_GLOBAL_TURN_MAX, DEFAULT_GLOBAL_WARNING_START
+import random
+import json
 
 from schemas.talk import (
     TalkStartRequest,
@@ -370,10 +373,10 @@ def talk_turn(req: TalkTurnRequest, db: Session = Depends(get_db)):
     POST /talk/turn
     idle 혼잣말 기반 대화 턴
     """
-    # 1) psano_state 읽기
+    # 1) psano_state 읽기 (글로벌 턴 카운트 포함)
     st = db.execute(
         text("""
-            SELECT phase, persona_prompt, values_summary
+            SELECT phase, persona_prompt, values_summary, global_turn_count
             FROM psano_state
             WHERE id = 1
         """)
@@ -381,6 +384,38 @@ def talk_turn(req: TalkTurnRequest, db: Session = Depends(get_db)):
 
     if not st:
         raise HTTPException(status_code=500, detail="psano_state(id=1) not found")
+
+    # 글로벌 설정 로드
+    global_turn_max = get_config(db, "global_turn_max", DEFAULT_GLOBAL_TURN_MAX)
+    global_warning_start = get_config(db, "global_warning_start", DEFAULT_GLOBAL_WARNING_START)
+    global_turn_count = int(st.get("global_turn_count") or 0)
+
+    # 2) 글로벌 엔딩 체크 (365 도달)
+    if global_turn_count >= global_turn_max:
+        global_ending_msg = get_config(db, "global_ending_message", "여기까지야.")
+        return {
+            "status": Status.ok,
+            "ui_text": global_ending_msg,
+            "fallback_code": None,
+            "policy_category": None,
+            "should_end": True,
+            "warning_text": None,
+            "global_ended": True,
+        }
+
+    # 3) 예고 구간 체크 (355~364)
+    warning_text = None
+    if global_turn_count >= global_warning_start:
+        try:
+            warning_messages_raw = get_config(db, "global_warning_messages", None)
+            if warning_messages_raw:
+                if isinstance(warning_messages_raw, str):
+                    warning_messages = json.loads(warning_messages_raw)
+                else:
+                    warning_messages = warning_messages_raw
+                warning_text = random.choice(warning_messages)
+        except Exception:
+            warning_text = "이제 시간이 거의 다 되어가는 것 같아."
 
     # 2) 세션 체크
     sess = db.execute(
@@ -431,12 +466,24 @@ def talk_turn(req: TalkTurnRequest, db: Session = Depends(get_db)):
         )
         db.commit()
 
+        # 정책 필터 시에도 글로벌 턴 카운트 증가
+        db.execute(
+            text("""
+                UPDATE psano_state
+                SET global_turn_count = COALESCE(global_turn_count, 0) + 1
+                WHERE id = 1
+            """)
+        )
+        db.commit()
+
         return {
             "status": Status.fallback,
             "ui_text": policy["assistant_text"],
             "fallback_code": policy["fallback_code"],
             "policy_category": policy.get("policy_category"),
             "should_end": policy.get("should_end", False),
+            "warning_text": warning_text,
+            "global_ended": False,
         }
 
     # 6) 세션 메모 + 최근 턴 로드
@@ -501,10 +548,22 @@ def talk_turn(req: TalkTurnRequest, db: Session = Depends(get_db)):
     # 10) 세션 메모/턴카운트 업데이트
     _update_session_memory(db, req.session_id, new_memory)
 
+    # 11) 글로벌 턴 카운트 증가
+    db.execute(
+        text("""
+            UPDATE psano_state
+            SET global_turn_count = COALESCE(global_turn_count, 0) + 1
+            WHERE id = 1
+        """)
+    )
+    db.commit()
+
     return {
         "status": status,
         "ui_text": assistant_text,
         "fallback_code": fallback_code,
+        "warning_text": warning_text,
+        "global_ended": False,
     }
 
 
