@@ -76,11 +76,15 @@ def start_session(req: SessionStartRequest, db: Session = Depends(get_db)):
             "idle_turn_count": 0,
         }
 
-        return {
-            "session_id": sid,
-            "phase": GLOBAL_STATE["phase"],
-            "current_question": start_question_id,
-        }
+    # 이벤트 로깅
+    from util.utils import log_event
+    log_event("session_start", session_id=sid, visitor=name, start_question=start_question_id)
+
+    return {
+        "session_id": sid,
+        "phase": GLOBAL_STATE["phase"],
+        "current_question": start_question_id,
+    }
 
 
 @router.post("/end", response_model=SessionEndResponse)

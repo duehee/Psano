@@ -137,6 +137,12 @@ def post_answer(req: AnswerRequest, db: Session = Depends(get_db)):
     # 설정 로드
     session_limit = get_config(db, "session_question_limit", DEFAULT_SESSION_QUESTION_LIMIT)
 
+    # 현재 사이클 번호 조회
+    cycle_row = db.execute(
+        text("SELECT cycle_number FROM psano_state WHERE id = 1")
+    ).mappings().first()
+    current_cycle = int(cycle_row["cycle_number"]) if cycle_row else 1
+
     # 0) 세션 존재/종료 체크 + start_question_id 조회
     ses = db.execute(
         text("SELECT id, ended_at, start_question_id FROM sessions WHERE id = :sid"),
@@ -213,19 +219,20 @@ def post_answer(req: AnswerRequest, db: Session = Depends(get_db)):
         # 4) answers 저장 (psano_personality, current_question은 세션 종료 시 일괄 반영)
         db.execute(
             text("""
-                INSERT INTO answers (session_id, question_id, choice, chosen_value_key)
-                VALUES (:sid, :qid, :choice, :chosen_value_key)
+                INSERT INTO answers (session_id, question_id, choice, chosen_value_key, cycle_id)
+                VALUES (:sid, :qid, :choice, :chosen_value_key, :cycle_id)
             """),
-            {"sid": sid, "qid": qid, "choice": choice, "chosen_value_key": chosen_value_key}
+            {"sid": sid, "qid": qid, "choice": choice, "chosen_value_key": chosen_value_key, "cycle_id": current_cycle}
         )
 
         # 5) session_question_index 계산 (방금 저장했으니 +1)
         session_question_index = answered_before + 1
         session_should_end = (session_question_index >= session_limit)
 
-        # 6) 전역 answered_total 계산 (GPT 반응 성장단계용)
+        # 6) 전역 answered_total 계산 (현재 사이클만, GPT 반응 성장단계용)
         total_row = db.execute(
-            text("SELECT COUNT(*) AS cnt FROM answers")
+            text("SELECT COUNT(*) AS cnt FROM answers WHERE cycle_id = :cycle_id"),
+            {"cycle_id": current_cycle}
         ).mappings().first()
         answered_total = int(total_row["cnt"]) if total_row else 0
 

@@ -4,7 +4,8 @@ from sqlalchemy import text
 
 from schemas.state import StateResponse
 from database import get_db
-from util.constants import VALUE_KEYS_ORDERED, TALK_UNLOCK_THRESHOLD
+from util.constants import VALUE_KEYS_ORDERED, TALK_UNLOCK_THRESHOLD, DEFAULT_GLOBAL_TURN_MAX
+from util.utils import get_config
 
 router = APIRouter()
 
@@ -13,11 +14,11 @@ VALUE_KEYS = VALUE_KEYS_ORDERED
 @router.get("", response_model=StateResponse)
 def get_state(db: Session = Depends(get_db)):
     # 1) psano_state 가져오기
-    #    persona_prompt 컬럼이 있을 수도/없을 수도 있으니 try로 안전 처리
+    #    persona_prompt, global_turn_count, cycle_number 컬럼이 있을 수도/없을 수도 있으니 try로 안전 처리
     try:
         row = db.execute(
             text("""
-                SELECT phase, current_question, formed_at, persona_prompt
+                SELECT phase, current_question, formed_at, persona_prompt, global_turn_count, cycle_number
                 FROM psano_state
                 WHERE id = 1
             """)
@@ -42,9 +43,11 @@ def get_state(db: Session = Depends(get_db)):
     if phase_out not in ("teach", "talk"):
         phase_out = "teach"  # 알 수 없는 값이면 teach로 fallback
 
-    # 3) answered_total (누적 답변 수)
+    # 3) answered_total (현재 사이클의 누적 답변 수)
+    current_cycle = int(row.get("cycle_number") or 1)
     cnt_row = db.execute(
-        text("SELECT COUNT(*) AS cnt FROM answers")
+        text("SELECT COUNT(*) AS cnt FROM answers WHERE cycle_id = :cycle_id"),
+        {"cycle_id": current_cycle}
     ).mappings().first()
     answered_total = int(cnt_row["cnt"]) if cnt_row else 0
 
@@ -65,6 +68,11 @@ def get_state(db: Session = Depends(get_db)):
     # 5) talk_unlocked
     talk_unlocked = (phase_out == "talk") or (answered_total >= TALK_UNLOCK_THRESHOLD)
 
+    # 6) 글로벌 엔딩 정보
+    global_turn_count = int(row.get("global_turn_count") or 0)
+    global_turn_max = get_config(db, "global_turn_max", DEFAULT_GLOBAL_TURN_MAX)
+    global_ended = global_turn_count >= global_turn_max
+
     return {
         "phase": phase_out,
         "current_question": int(row["current_question"]),
@@ -73,4 +81,8 @@ def get_state(db: Session = Depends(get_db)):
         "talk_unlocked": talk_unlocked,
         "formed_at": formed_iso,
         "persona_prompt": row.get("persona_prompt") if "persona_prompt" in row else None,
+        "global_turn_count": global_turn_count,
+        "global_turn_max": global_turn_max,
+        "global_ended": global_ended,
+        "cycle_number": current_cycle,
     }

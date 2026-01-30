@@ -710,7 +710,7 @@ def get_progress(db: Session = Depends(get_db)):
     global_turn_max = get_config(db, "global_turn_max", 365)
 
     st = db.execute(
-        text("SELECT phase, current_question, global_turn_count FROM psano_state WHERE id = 1")
+        text("SELECT phase, current_question, global_turn_count, cycle_number FROM psano_state WHERE id = 1")
     ).mappings().first()
 
     if not st:
@@ -721,7 +721,15 @@ def get_progress(db: Session = Depends(get_db)):
         phase = "teach"
 
     current_q = int(st["current_question"])
-    answered = max_questions if phase == "talk" else max(0, min(max_questions, current_q - 1))
+    cycle_number = int(st.get("cycle_number") or 1)
+
+    # 현재 사이클의 답변 수만 카운트
+    cnt_row = db.execute(
+        text("SELECT COUNT(*) AS cnt FROM answers WHERE cycle_id = :cycle_id"),
+        {"cycle_id": cycle_number}
+    ).mappings().first()
+    answered = int(cnt_row["cnt"]) if cnt_row else 0
+
     ratio = float(answered) / float(max_questions) if max_questions > 0 else 0.0
     global_turn_count = int(st.get("global_turn_count") or 0)
 
@@ -733,6 +741,7 @@ def get_progress(db: Session = Depends(get_db)):
         "progress_ratio": ratio,
         "global_turn_count": global_turn_count,
         "global_turn_max": global_turn_max,
+        "cycle_number": cycle_number,
     }
 
 
@@ -807,6 +816,95 @@ def admin_reset(req: AdminResetRequest, db: Session = Depends(get_db)):
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"db error: {e}")
+
+
+@router.post("/cycle-reset")
+def admin_cycle_reset(db: Session = Depends(get_db)):
+    """
+    사이클 리셋: 새로운 사이클 시작 (데이터 보존)
+    - cycle_number 증가
+    - state 초기화 (phase=teach, current_question=1, global_turn_count=0, etc.)
+    - personality 초기화 (모든 값 0)
+    - answers, sessions는 유지 (과거 데이터 보존)
+    """
+    try:
+        ensure_psano_state_row(db)
+
+        # 1) 현재 cycle_number 조회
+        row = db.execute(
+            text("SELECT cycle_number FROM psano_state WHERE id = 1")
+        ).mappings().first()
+        current_cycle = int(row.get("cycle_number") or 1) if row else 1
+        new_cycle = current_cycle + 1
+
+        # 2) psano_state 업데이트 (새 사이클 시작)
+        try:
+            db.execute(text("""
+                UPDATE psano_state
+                SET phase = 'teach',
+                    current_question = 1,
+                    formed_at = NULL,
+                    persona_prompt = NULL,
+                    values_summary = NULL,
+                    global_turn_count = 0,
+                    cycle_number = :new_cycle
+                WHERE id = 1
+            """), {"new_cycle": new_cycle})
+        except Exception:
+            # values_summary 컬럼이 없는 경우
+            db.execute(text("""
+                UPDATE psano_state
+                SET phase = 'teach',
+                    current_question = 1,
+                    global_turn_count = 0,
+                    cycle_number = :new_cycle
+                WHERE id = 1
+            """), {"new_cycle": new_cycle})
+
+        # 3) psano_personality 초기화 (새 페르소나 구축 준비)
+        db.execute(text("""
+            UPDATE psano_personality
+            SET self_direction = 0, conformity = 0, stimulation = 0, security = 0,
+                hedonism = 0, tradition = 0, achievement = 0, benevolence = 0,
+                power = 0, universalism = 0
+            WHERE id = 1
+        """))
+
+        # 4) 활성 세션 모두 종료 (이전 사이클 세션이 current_question 오염 방지)
+        from util.utils import now_kst_naive
+        db.execute(text("""
+            UPDATE sessions
+            SET ended_at = :now, end_reason = 'cycle_reset'
+            WHERE ended_at IS NULL
+        """), {"now": now_kst_naive()})
+
+        # 5) 메모리 캐시 동기화
+        with LOCK:
+            GLOBAL_STATE["phase"] = "teach"
+            GLOBAL_STATE["current_question"] = 1
+            GLOBAL_STATE["formed_at"] = None
+            GLOBAL_STATE["persona_prompt"] = None
+            GLOBAL_STATE["values_summary"] = None
+            GLOBAL_STATE["global_turn_count"] = 0
+            GLOBAL_STATE["cycle_number"] = new_cycle
+
+        db.commit()
+
+        # 이벤트 로깅
+        from util.utils import log_event
+        log_event("cycle_reset", new_cycle=new_cycle, previous_cycle=current_cycle)
+
+        return {
+            "ok": True,
+            "previous_cycle": current_cycle,
+            "new_cycle": new_cycle,
+            "message": f"사이클 {new_cycle} 시작 (이전 데이터 보존)"
+        }
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"cycle reset error: {e}")
+
 
 @router.post("/phase/set", response_model=AdminPhaseSetResponse)
 def admin_set_phase(req: AdminPhaseSetRequest, db: Session = Depends(get_db)):
@@ -1444,15 +1542,16 @@ def admin_quick_test(
     import random
 
     try:
-        # 1) psano_state에서 현재 질문 조회
+        # 1) psano_state에서 현재 질문, 사이클 조회
         st = db.execute(
-            text("SELECT current_question FROM psano_state WHERE id = 1")
+            text("SELECT current_question, cycle_number FROM psano_state WHERE id = 1")
         ).mappings().first()
 
         if not st:
             raise HTTPException(status_code=500, detail="psano_state(id=1) not found")
 
         start_question_id = int(st["current_question"])
+        current_cycle = int(st.get("cycle_number") or 1)
 
         # 2) 세션 생성
         from util.utils import now_kst_naive
@@ -1497,10 +1596,10 @@ def admin_quick_test(
             # 답변 저장
             db.execute(
                 text("""
-                    INSERT INTO answers (session_id, question_id, choice, chosen_value_key)
-                    VALUES (:sid, :qid, :choice, :value_key)
+                    INSERT INTO answers (session_id, question_id, choice, chosen_value_key, cycle_id)
+                    VALUES (:sid, :qid, :choice, :value_key, :cycle_id)
                 """),
-                {"sid": session_id, "qid": qid, "choice": choice, "value_key": chosen_value_key}
+                {"sid": session_id, "qid": qid, "choice": choice, "value_key": chosen_value_key, "cycle_id": current_cycle}
             )
 
             answers_submitted.append({

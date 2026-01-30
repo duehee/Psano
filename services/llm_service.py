@@ -12,7 +12,7 @@ from typing import Optional, TYPE_CHECKING
 
 from openai import OpenAI
 
-from util.utils import _to_pretty, get_config
+from util.utils import get_config
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -77,10 +77,11 @@ def call_llm(
             # GPT-5, o1, o3 모델은 max_completion_tokens 사용
             is_new_model = any(x in model for x in ['gpt-5', 'gpt-4.1', 'o1', 'o3'])
 
-            # ✅ 추가: 요청 raw 로그 (프롬프트/파라미터 그대로 남김)
+            # 요청 로그 (간결한 요약)
+            prompt_len = len(prompt) if prompt else 0
             _llm_raw_logger.info(
-                "[LLM][REQ] attempt=%s/%s model=%s is_new_model=%s max_tokens=%s timeout=%s\nPROMPT:\n%s",
-                attempt + 1, llm_retry_count, model, is_new_model, max_tokens, llm_timeout, prompt
+                "[LLM][REQ] model=%s | attempt=%d/%d | max_tokens=%d | prompt_len=%d",
+                model, attempt + 1, llm_retry_count, max_tokens, prompt_len
             )
 
             if is_new_model:
@@ -100,31 +101,35 @@ def call_llm(
 
             elapsed_ms = (time.perf_counter() - t0) * 1000
 
-            # ✅ 기존 print를 raw 파일 로깅으로 대체 (원하던 덩어리 그대로)
-            _llm_raw_logger.info("[LLM] raw response elapsed_ms=%.1f\n%s", elapsed_ms, _to_pretty(resp))
-            _llm_raw_logger.info("[LLM] choices\n%s", _to_pretty(getattr(resp, "choices", None)))
-
             if not resp.choices:
+                _llm_raw_logger.info("[LLM][RESP] model=%s | status=error | elapsed=%.0fms | error=no_choices", model, elapsed_ms)
                 raise RuntimeError("no choices in response")
 
             message = resp.choices[0].message
-            _llm_raw_logger.info("[LLM] message\n%s", _to_pretty(message))
-
             content = (message.content or "").strip()
 
             if not content:
-                # reasoning 모델은 content 대신 다른 필드 사용할 수 있음
-                _llm_raw_logger.info("[LLM] content empty, checking other fields...")
+                _llm_raw_logger.info("[LLM][RESP] model=%s | status=error | elapsed=%.0fms | error=empty_content", model, elapsed_ms)
                 raise RuntimeError("empty output from LLM")
+
+            # 성공 응답 로그
+            content_len = len(content)
+            usage = getattr(resp, "usage", None)
+            tokens_info = f"in={usage.prompt_tokens}/out={usage.completion_tokens}" if usage else "n/a"
+            _llm_raw_logger.info(
+                "[LLM][RESP] model=%s | status=ok | elapsed=%.0fms | tokens=%s | content_len=%d",
+                model, elapsed_ms, tokens_info, content_len
+            )
+            # 실제 응답 내용 (별도 라인)
+            _llm_raw_logger.info("[LLM][CONTENT] %s", content[:500] + "..." if len(content) > 500 else content)
 
             return LLMResult(success=True, content=content, fallback_code=None)
 
         except Exception as e:
             last_error = e
-            # ✅ 기존 print를 raw 파일 로깅으로 대체
             _llm_raw_logger.info(
-                "[LLM] attempt %s/%s failed: %s: %s",
-                attempt + 1, llm_retry_count, type(e).__name__, str(e)
+                "[LLM][ERROR] model=%s | attempt=%d/%d | error=%s: %s",
+                model, attempt + 1, llm_retry_count, type(e).__name__, str(e)[:200]
             )
             # 마지막 시도가 아니면 잠시 대기 후 재시도
             if attempt < llm_retry_count - 1:
@@ -132,7 +137,7 @@ def call_llm(
             continue
 
     # 모든 재시도 실패
-    _llm_raw_logger.info("[LLM] all retries failed. model=%s, error=%r", model, last_error)
+    _llm_raw_logger.info("[LLM][FAILED] model=%s | all_retries_exhausted | error=%s", model, str(last_error)[:200])
     fallback_code = _map_error_to_code(last_error)
     return LLMResult(
         success=False,

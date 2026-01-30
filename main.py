@@ -6,7 +6,7 @@ from middleware.access_log import access_log_middleware
 load_dotenv()
 
 from fastapi import FastAPI
-from routers import health, session, question, answer, state, talk, ui, admin, persona, monologue, test, idle
+from routers import health, session, question, answer, state, talk, ui, admin, persona, monologue, test, idle, monitor
 
 setup_logging()
 app = FastAPI(title="Psano Backend", version="0.1.0")
@@ -25,3 +25,4 @@ app.include_router(admin.router, prefix="/admin", tags=["admin"])
 app.include_router(persona.router, prefix="/persona", tags=["persona"])
 app.include_router(monologue.router, prefix="/monologue", tags=["monologue"])
 app.include_router(idle.router, prefix="/idle", tags=["idle"])
+app.include_router(monitor.router, prefix="/monitor", tags=["monitor"])

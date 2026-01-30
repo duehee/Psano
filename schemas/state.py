@@ -12,3 +12,11 @@ class StateResponse(BaseModel):
     talk_unlocked: Optional[bool] = None
     formed_at: Optional[str] = None
     persona_prompt: Optional[str] = None
+
+    # 글로벌 엔딩 관련
+    global_turn_count: Optional[int] = None
+    global_turn_max: Optional[int] = None
+    global_ended: Optional[bool] = None
+
+    # 사이클
+    cycle_number: Optional[int] = None

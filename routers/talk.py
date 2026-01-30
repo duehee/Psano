@@ -390,6 +390,10 @@ def talk_start(req: TalkStartRequest, db: Session = Depends(get_db)):
         assistant_first_text = trim(result.content, OUTPUT_LIMIT)
         fallback_code = result.fallback_code
 
+    # 이벤트 로깅
+    from util.utils import log_event
+    log_event("talk_start", session_id=req.session_id, idle_id=req.idle_id)
+
     return {
         "status": status,
         "assistant_first_text": assistant_first_text,
@@ -424,6 +428,9 @@ def talk_turn(req: TalkTurnRequest, db: Session = Depends(get_db)):
     # 2) 글로벌 엔딩 체크 (365 도달)
     if global_turn_count >= global_turn_max:
         global_ending_msg = get_config(db, "global_ending_message", "여기까지야.")
+        # 이벤트 로깅
+        from util.utils import log_event
+        log_event("global_ending", turn_count=global_turn_count, turn_max=global_turn_max)
         return {
             "status": Status.ok,
             "ui_text": global_ending_msg,

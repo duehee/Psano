@@ -161,6 +161,10 @@ def end_session_core(db: Session, sid: int, reason: str) -> Dict[str, Any]:
             sess["ended_at"] = ended_at
             sess["end_reason"] = reason
 
+    # 이벤트 로깅
+    from util.utils import log_event
+    log_event("session_end", session_id=sid, reason=reason)
+
     return {
         "session_id": sid,
         "ended": True,

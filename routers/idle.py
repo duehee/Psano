@@ -49,9 +49,15 @@ def get_idle_greeting(db: Session = Depends(get_db)):
     현재 성장단계에 맞는 idle 인사말 반환.
     TouchDesigner에서 idle 상태의 사노를 클릭했을 때 호출.
     """
-    # 1) 현재 answered_total 조회
+    # 1) 현재 사이클의 answered_total 조회
+    cycle_row = db.execute(
+        text("SELECT cycle_number FROM psano_state WHERE id = 1")
+    ).mappings().first()
+    current_cycle = int(cycle_row["cycle_number"]) if cycle_row else 1
+
     total_row = db.execute(
-        text("SELECT COUNT(*) AS cnt FROM answers")
+        text("SELECT COUNT(*) AS cnt FROM answers WHERE cycle_id = :cycle_id"),
+        {"cycle_id": current_cycle}
     ).mappings().first()
     answered_total = int(total_row["cnt"]) if total_row else 0
 

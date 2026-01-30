@@ -306,6 +306,10 @@ def _generate_persona(db: Session, *, force: bool, model: str | None, allow_unde
         GLOBAL_STATE["persona_prompt"] = persona_prompt
         GLOBAL_STATE["values_summary"] = values_summary
 
+    # 이벤트 로깅
+    from util.utils import log_event
+    log_event("persona_generated", answered_total=answered_total, used_fallback=False)
+
     # warnings는 응답에 포함시키고 싶으면 pair_insights에 넣어도 됨
     if warnings:
         pair_insights["_warnings"] = warnings

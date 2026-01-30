@@ -799,6 +799,7 @@ HTML = r"""
         <div style="display: flex; flex-direction: column; gap: 6px; font-size: 12px; font-family: var(--mono);">
           <div>Phase: <strong id="statePhase">-</strong></div>
           <div>Question: <strong id="stateQuestion">-</strong></div>
+          <div>Cycle: <strong id="stateCycle">-</strong></div>
         </div>
       </div>
     </aside>
@@ -960,6 +961,10 @@ HTML = r"""
                 <div class="stat-value" id="admGlobalTurn">-</div>
                 <div class="stat-label">Global Turns</div>
               </div>
+              <div class="stat">
+                <div class="stat-value" id="admCycle">1</div>
+                <div class="stat-label">Cycle</div>
+              </div>
             </div>
           </div>
         </div>
@@ -976,7 +981,10 @@ HTML = r"""
               <label class="checkbox"><input type="checkbox" id="resetState" /> state</label>
               <label class="checkbox"><input type="checkbox" id="resetPersonality" /> personality</label>
             </div>
-            <button class="btn btn-danger" onclick="adminReset()">Reset Selected</button>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+              <button class="btn btn-danger" onclick="adminReset()">Reset Selected</button>
+              <button class="btn btn-danger" onclick="adminResetCycle()" title="모든 항목 초기화 (answers, sessions, state, personality)">🔄 Cycle Reset</button>
+            </div>
           </div>
         </div>
 
@@ -1413,6 +1421,7 @@ HTML = r"""
       const data = await fetchJson('/state');
       document.getElementById('statePhase').textContent = data.phase || '-';
       document.getElementById('stateQuestion').textContent = data.current_question || '-';
+      document.getElementById('stateCycle').textContent = data.cycle_number || '1';
       log({ endpoint: '/state', data });
     } catch (e) {
       log({ error: e.message });
@@ -1894,11 +1903,22 @@ HTML = r"""
         clearNudgeTimer();
         clearSessionTimeout();
         toast('글로벌 엔딩 - 사노 종료', 'error');
+        // 3초 후 자동 세션 종료 + 전체 초기화 (형성기로 복귀)
+        setTimeout(async () => {
+          await endTalk();
+          addChatMessage('system', '🔄 새로운 사이클을 위해 초기화 중...');
+          setTimeout(async () => {
+            await adminResetCycleQuiet();
+          }, 1000);
+        }, 3000);
       } else if (data.should_end) {
         addChatMessage('system', '🟡 로컬 엔딩 - 세션 토큰 소진');
+        document.getElementById('talkInput').disabled = true;
         clearNudgeTimer();
         clearSessionTimeout();
         toast('로컬 엔딩 - 대화 종료', 'info');
+        // 3초 후 자동 세션 종료
+        setTimeout(() => endTalk(), 3000);
       } else {
         // 대화 계속 - 타이머 리셋
         startNudgeTimer();
@@ -1946,11 +1966,36 @@ HTML = r"""
     showSpinner(false);
   }
 
-  function endTalk() {
+  async function endTalk() {
     // 타이머 정리
     clearNudgeTimer();
     clearSessionTimeout();
     nudgeFiredThisTurn = false;
+
+    log({ action: 'endTalk called', sessionId: sessionId });
+
+    // 서버에 세션 종료 요청
+    if (sessionId) {
+      const endingSessionId = sessionId;  // 로깅용 복사
+      try {
+        const data = await fetchJson('/talk/end', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session_id: sessionId })
+        });
+        log({ endpoint: '/talk/end', data, sessionId: endingSessionId });
+        toast('세션이 종료되었습니다', 'success');
+      } catch (e) {
+        console.error('Failed to end talk session:', e);
+        log({ endpoint: '/talk/end', error: e.message, sessionId: endingSessionId });
+        toast(`세션 종료 실패: ${e.message}`, 'error');
+      }
+      // 세션 ID 클리어 (성공/실패 관계없이)
+      sessionId = null;
+      document.getElementById('sessionId').textContent = '-';
+    } else {
+      log({ action: 'endTalk skipped', reason: 'no sessionId' });
+    }
 
     document.getElementById('talkChatArea').style.display = 'none';
     document.getElementById('btnStartTalk').style.display = 'inline-block';
@@ -1985,6 +2030,7 @@ HTML = r"""
       document.getElementById('admRatio').textContent = Math.round((data.progress_ratio || 0) * 100) + '%';
       document.getElementById('admPhase').textContent = data.phase ?? '-';
       document.getElementById('admGlobalTurn').textContent = `${data.global_turn_count ?? 0}/${data.global_turn_max ?? 365}`;
+      document.getElementById('admCycle').textContent = data.cycle_number ?? '1';
       log({ endpoint: '/admin/progress', data });
     } catch (e) {
       log({ error: e.message });
@@ -2023,6 +2069,41 @@ HTML = r"""
       await fetchAdminProgress();
     } catch (e) {
       log({ error: e.message });
+    }
+  }
+
+  async function adminResetCycle() {
+    if (!confirm('새로운 사이클을 시작합니다.\\n\\n- state (상태) 초기화\\n- personality (성격) 초기화\\n- answers, sessions 데이터 보존\\n\\n계속하시겠습니까?')) {
+      return;
+    }
+    try {
+      showSpinner(true);
+      const data = await fetchJson('/admin/cycle-reset', { method: 'POST' });
+      log({ endpoint: '/admin/cycle-reset', data });
+      toast(`사이클 ${data.new_cycle} 시작 - 형성기로 돌아갑니다`, 'success');
+      await refreshState();
+      await fetchAdminProgress();
+    } catch (e) {
+      toast(`사이클 리셋 실패: ${e.message}`, 'error');
+      log({ error: e.message });
+    }
+    showSpinner(false);
+  }
+
+  // 글로벌 엔딩 후 자동 사이클 리셋 (데이터 보존, 확인 없이 바로 실행)
+  // 성공 시 true, 실패 시 false 반환
+  async function adminResetCycleQuiet() {
+    try {
+      const data = await fetchJson('/admin/cycle-reset', { method: 'POST' });
+      log({ endpoint: '/admin/cycle-reset (auto)', data });
+      toast(`사이클 ${data.new_cycle} 시작 - 형성기로 돌아갑니다`, 'success');
+      await refreshState();
+      await fetchAdminProgress();
+      return true;
+    } catch (e) {
+      toast(`사이클 리셋 실패: ${e.message}`, 'error');
+      log({ error: e.message });
+      return false;
     }
   }
 
@@ -2886,3 +2967,4 @@ HTML = r"""
 @router.get("", response_class=HTMLResponse)
 def ui():
     return HTMLResponse(content=HTML)
+

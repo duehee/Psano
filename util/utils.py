@@ -27,6 +27,29 @@ CONFIG_CACHE_TTL = 60  # 초
 
 
 # ============================================================
+# ✅ 비즈니스 이벤트 로깅 유틸
+# ============================================================
+
+_event_logger = logging.getLogger("psano")
+
+
+def log_event(event: str, **kwargs):
+    """
+    비즈니스 이벤트 로깅 (app.log)
+
+    Usage:
+        log_event("cycle_reset", cycle=2, previous=1)
+        log_event("session_start", session_id=123, cycle=1)
+
+    Output:
+        [EVENT] cycle_reset | cycle=2 | previous=1
+    """
+    parts = [f"{k}={v}" for k, v in kwargs.items()]
+    msg = f"[EVENT] {event} | " + " | ".join(parts) if parts else f"[EVENT] {event}"
+    _event_logger.info(msg)
+
+
+# ============================================================
 # ✅ LLM RAW 로깅 유틸
 # ============================================================
 
@@ -188,9 +211,15 @@ def _load_all_configs(db: Session) -> Dict[str, Any]:
         value_type = row.get("value_type", "str")
 
         if value_type == "int":
-            result[key] = int(value)
+            try:
+                result[key] = int(value) if value else 0
+            except (ValueError, TypeError):
+                result[key] = 0
         elif value_type == "float":
-            result[key] = float(value)
+            try:
+                result[key] = float(value) if value else 0.0
+            except (ValueError, TypeError):
+                result[key] = 0.0
         elif value_type == "json":
             try:
                 result[key] = json.loads(value)

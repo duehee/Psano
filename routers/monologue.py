@@ -33,9 +33,16 @@ def _apply_policy_guard(db: Session, text_for_check: str, user_text: str = ""):
 # -----------------------
 
 def _answered_total(db: Session) -> int:
-    # 지금은 answers COUNT를 쓰는 버전 (안정적)
+    # 현재 사이클의 답변 수만 카운트
     try:
-        n = db.execute(text("SELECT COUNT(*) FROM answers")).scalar()
+        cycle_row = db.execute(
+            text("SELECT cycle_number FROM psano_state WHERE id = 1")
+        ).mappings().first()
+        current_cycle = int(cycle_row["cycle_number"]) if cycle_row else 1
+        n = db.execute(
+            text("SELECT COUNT(*) FROM answers WHERE cycle_id = :cycle_id"),
+            {"cycle_id": current_cycle}
+        ).scalar()
         return int(n or 0)
     except Exception:
         return 0
