@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import random
 from io import BytesIO
 from typing import Optional, Dict
 
@@ -8,10 +9,11 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 from database import get_db
-from util.utils import iso, now_kst_naive, get_config
+from util.utils import iso, now_kst_naive, get_config, log_event, clear_config_cache, clear_prompt_cache
 from util.constants import MAX_QUESTIONS
 from routers.persona import _generate_persona
 from routers._store import LOCK, GLOBAL_STATE
+from routers.talk_policy import clear_cache as clear_policy_cache
 from schemas.admin import (
     AdminSessionsResponse, AdminProgressResponse,
     AdminResetRequest, AdminResetResponse,
@@ -602,10 +604,10 @@ async def admin_policy_rules_import(
                 result.errors.append(ImportErrorItem(row=r, message="Missing keywords (C column)"))
                 continue
 
-            # 0/1 파싱
-            is_regex = 1 if is_regex_raw in ("1", "Y", "y", "true", "True") else 0
-            should_end = 1 if should_end_raw in ("1", "Y", "y", "true", "True") else 0
-            enabled = 1 if enabled_raw in ("1", "Y", "y", "true", "True") else 0
+            # 0/1 파싱 (_parse_enabled 사용, 인식 못하면 0)
+            is_regex = _parse_enabled(is_regex_raw) or 0
+            should_end = _parse_enabled(should_end_raw) or 0
+            enabled = _parse_enabled(enabled_raw) or 0
 
             # 기본값 처리
             if not action:
@@ -637,8 +639,7 @@ async def admin_policy_rules_import(
 
         # 캐시 클리어
         try:
-            from routers.talk_policy import clear_cache
-            clear_cache()
+            clear_policy_cache()
         except Exception:
             pass
 
@@ -753,7 +754,12 @@ def get_progress(db: Session = Depends(get_db)):
 def admin_reset(req: AdminResetRequest, db: Session = Depends(get_db)):
     """초기화: state, answers, sessions, personality"""
 
+    # 허용된 테이블만 리셋 가능 (SQL injection 방지)
+    ALLOWED_TABLES = {"answers", "sessions", "idle_talk_messages"}
+
     def _reset_table(table_name: str):
+        if table_name not in ALLOWED_TABLES:
+            raise ValueError(f"Invalid table name: {table_name}")
         db.execute(text(f"DELETE FROM {table_name}"))
         db.execute(text(f"ALTER TABLE {table_name} AUTO_INCREMENT = 1"))
 
@@ -871,7 +877,6 @@ def admin_cycle_reset(db: Session = Depends(get_db)):
         """))
 
         # 4) 활성 세션 모두 종료 (이전 사이클 세션이 current_question 오염 방지)
-        from util.utils import now_kst_naive
         db.execute(text("""
             UPDATE sessions
             SET ended_at = :now, end_reason = 'cycle_reset'
@@ -891,7 +896,6 @@ def admin_cycle_reset(db: Session = Depends(get_db)):
         db.commit()
 
         # 이벤트 로깅
-        from util.utils import log_event
         log_event("cycle_reset", new_cycle=new_cycle, previous_cycle=current_cycle)
 
         return {
@@ -1146,7 +1150,6 @@ def admin_config_update(
 @router.post("/config/clear-cache")
 def admin_config_clear_cache():
     """설정 캐시 초기화"""
-    from util.utils import clear_config_cache
     clear_config_cache()
     return {"ok": True, "message": "config cache cleared"}
 
@@ -1240,7 +1243,6 @@ def admin_prompt_update(
 @router.post("/prompts/clear-cache")
 def admin_prompts_clear_cache():
     """프롬프트 캐시 초기화"""
-    from util.utils import clear_prompt_cache
     clear_prompt_cache()
     return {"ok": True, "message": "prompt cache cleared"}
 
@@ -1539,8 +1541,6 @@ def admin_quick_test(
     Quick Test: 세션 시작 → 지정된 수의 답변 자동 제출 → 세션 종료
     각 질문에 랜덤(A/B)으로 응답
     """
-    import random
-
     try:
         # 1) psano_state에서 현재 질문, 사이클 조회
         st = db.execute(
@@ -1554,7 +1554,6 @@ def admin_quick_test(
         current_cycle = int(st.get("cycle_number") or 1)
 
         # 2) 세션 생성
-        from util.utils import now_kst_naive
         started_at = now_kst_naive()
 
         result = db.execute(
@@ -1630,7 +1629,8 @@ def admin_quick_test(
                 {"last_qid": answers_submitted[-1]["question_id"]}
             ).mappings().first()
 
-            new_current_q = int(next_q["id"]) if next_q else 381
+            # 다음 질문이 없으면 모든 질문 완료 상태로
+            new_current_q = int(next_q["id"]) if next_q else (MAX_QUESTIONS + 1)
             db.execute(
                 text("UPDATE psano_state SET current_question = :q WHERE id = 1"),
                 {"q": new_current_q}
@@ -1824,9 +1824,8 @@ def admin_policy_rule_toggle(
         )
         db.commit()
 
-        # 캐시 클리어 (talk_policy에서 import)
-        from routers.talk_policy import clear_cache
-        clear_cache()
+        # 캐시 클리어
+        clear_policy_cache()
 
         return {"ok": True, "id": rule_id, "enabled": new_enabled}
 

@@ -144,7 +144,6 @@ MONITOR_HTML = r"""
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="refresh" content="2">
   <title>Psano Monitor</title>
   <style>
     :root {
@@ -639,8 +638,9 @@ MONITOR_HTML = r"""
       }
     }
 
-    // Initial fetch
+    // Initial fetch + auto refresh every 2 seconds
     fetchData();
+    setInterval(fetchData, 2000);
   </script>
 </body>
 </html>
