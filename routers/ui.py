@@ -782,6 +782,12 @@ HTML = r"""
         <button class="nav-item" onclick="showSection('admin')">
           <span class="icon">⚙️</span> Admin
         </button>
+        <button class="nav-item" onclick="showSection('data')">
+          <span class="icon">📊</span> Data
+        </button>
+        <button class="nav-item" onclick="showSection('settings')">
+          <span class="icon">🔧</span> Settings
+        </button>
         <button class="nav-item" onclick="showSection('debug')">
           <span class="icon">🔍</span> Debug
         </button>
@@ -810,10 +816,11 @@ HTML = r"""
             </div>
           </div>
           <div class="card-body">
-            <div style="display: flex; gap: 8px; margin-bottom: 16px; align-items: center;">
+            <div style="display: flex; gap: 8px; margin-bottom: 16px; align-items: center; flex-wrap: wrap;">
               <button class="btn btn-primary" onclick="testIdleGreeting()">Idle Greeting (인사말)</button>
               <button class="btn btn-secondary" onclick="testIdleMonologue()">Idle Monologue (혼잣말)</button>
               <button class="btn btn-secondary" onclick="testIdleRandom()">Idle Random (가치축)</button>
+              <button class="btn btn-secondary" onclick="testNudge()" title="대화 중 반응 없을 때 사노가 던지는 한마디 (Talk 세션 필요)">Nudge (찔러보기)</button>
               <select id="monologueModel" style="padding: 8px; border-radius: 6px; border: 1px solid var(--border);">
                 <option value="gpt-4o">gpt-4o</option>
                 <option value="gpt-4o-mini">gpt-4o-mini</option>
@@ -892,7 +899,15 @@ HTML = r"""
             </div>
             <!-- 채팅 영역 -->
             <div class="chat-container" id="talkChatArea" style="display: none;">
-              <div class="chat-messages" id="chatMessages" style="height: 350px; overflow-y: auto; padding: 16px; background: var(--secondary); border-radius: 8px; margin-bottom: 12px;">
+              <!-- 턴 카운트 & 정책 표시 -->
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                <div style="display: flex; gap: 8px; align-items: center;">
+                  <span class="badge" id="talkTurnBadge">Turn: 0</span>
+                  <span class="badge badge-warning" id="talkPolicyBadge" style="display: none;">정책 가이드 적용됨</span>
+                </div>
+                <span style="font-size: 11px; color: var(--muted);" id="talkStatusText"></span>
+              </div>
+              <div class="chat-messages" id="chatMessages" style="height: 320px; overflow-y: auto; padding: 16px; background: var(--secondary); border-radius: 8px; margin-bottom: 12px;">
                 <div class="message system">대화가 시작되면 여기에 표시됩니다</div>
               </div>
               <div class="chat-input-bar" style="display: flex; gap: 8px;">
@@ -959,7 +974,7 @@ HTML = r"""
           </div>
         </div>
 
-        <!-- ✅ State Control + Persona Generate (50:50) -->
+        <!-- State Control + Persona Generate (50:50) -->
         <div class="grid-2">
           <!-- Phase & Question -->
           <div class="card">
@@ -1006,6 +1021,165 @@ HTML = r"""
                   <button class="btn btn-primary" style="width: 100%;" onclick="personaGenerate()">페르소나 생성</button>
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Quick Test -->
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Quick Test</span>
+          </div>
+          <div class="card-body">
+            <p style="font-size: 13px; color: var(--muted); margin-bottom: 12px;">세션 생성 → 랜덤 답변 제출 → 세션 종료를 자동으로 실행합니다.</p>
+            <div class="form-row">
+              <div class="form-group" style="flex: 2;">
+                <label class="form-label">방문자 이름</label>
+                <input type="text" id="quickTestName" value="QuickTest" />
+              </div>
+              <div class="form-group" style="flex: 1;">
+                <label class="form-label">답변 수</label>
+                <input type="number" id="quickTestCount" value="5" min="1" max="10" />
+              </div>
+              <div class="form-group" style="flex: 0;">
+                <label class="form-label">&nbsp;</label>
+                <button class="btn btn-primary" onclick="runQuickTest()">Run Test</button>
+              </div>
+            </div>
+            <div id="quickTestResult" style="display: none; margin-top: 12px; padding: 12px; background: var(--secondary); border-radius: 8px; font-size: 12px; font-family: var(--mono);"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Data Section -->
+      <section class="section" id="sectionData">
+        <!-- Questions List -->
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Questions</span>
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <label class="checkbox" style="font-size: 12px;"><input type="checkbox" id="questionsEnabledOnly" /> enabled only</label>
+              <input type="number" id="questionsLimit" value="20" style="width: 50px;" placeholder="limit" />
+              <input type="number" id="questionsOffset" value="0" style="width: 50px;" placeholder="offset" />
+              <button class="btn btn-sm btn-secondary" onclick="loadQuestions()">Load</button>
+            </div>
+          </div>
+          <div class="card-body">
+            <div id="questionsBox" style="overflow: auto; max-height: 350px;">
+              <div style="color: var(--muted); font-size: 13px;">Click Load to fetch questions</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Idle List -->
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Idle List (혼잣말 목록)</span>
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <label class="checkbox" style="font-size: 12px;"><input type="checkbox" id="idleEnabledOnly" /> enabled only</label>
+              <input type="number" id="idleLimit" value="30" style="width: 50px;" placeholder="limit" />
+              <input type="number" id="idleOffset" value="0" style="width: 50px;" placeholder="offset" />
+              <button class="btn btn-sm btn-secondary" onclick="loadIdleList()">Load</button>
+            </div>
+          </div>
+          <div class="card-body">
+            <div id="idleListBox" style="overflow: auto; max-height: 350px;">
+              <div style="color: var(--muted); font-size: 13px;">Click Load to fetch idle list</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Policy Rules -->
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Policy Rules (정책 필터)</span>
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <label class="checkbox" style="font-size: 12px;"><input type="checkbox" id="policyEnabledOnly" /> enabled only</label>
+              <button class="btn btn-sm btn-secondary" onclick="loadPolicyRules()">Load</button>
+            </div>
+          </div>
+          <div class="card-body">
+            <div id="policyRulesBox" style="overflow: auto; max-height: 350px;">
+              <div style="color: var(--muted); font-size: 13px;">Click Load to fetch policy rules</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Growth Stages -->
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Growth Stages</span>
+            <button class="btn btn-sm btn-secondary" onclick="loadGrowthStages()">Load</button>
+          </div>
+          <div class="card-body">
+            <div id="growthStagesBox" style="overflow: auto; max-height: 300px;">
+              <div style="color: var(--muted); font-size: 13px;">Click Load to fetch growth stages</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Sessions -->
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Recent Sessions</span>
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <input type="number" id="admLimit" value="20" style="width: 60px;" />
+              <input type="number" id="admOffset" value="0" style="width: 60px;" />
+              <button class="btn btn-sm btn-secondary" onclick="fetchAdminSessions()">Load</button>
+            </div>
+          </div>
+          <div class="card-body">
+            <div id="admSessionsBox" style="overflow: auto; max-height: 300px;">
+              <div style="color: var(--muted); font-size: 13px;">Click Load to fetch sessions</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Settings Section -->
+      <section class="section" id="sectionSettings">
+        <!-- Config Management -->
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Config Settings</span>
+            <div style="display: flex; gap: 8px;">
+              <button class="btn btn-sm btn-secondary" onclick="loadConfigs()">Load</button>
+              <button class="btn btn-sm btn-ghost" onclick="clearConfigCache()">Clear Cache</button>
+            </div>
+          </div>
+          <div class="card-body">
+            <div id="configTableBox" style="overflow-x: auto; max-height: 400px;">
+              <div style="color: var(--muted); font-size: 13px;">Click Load to fetch configs</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Prompts Management -->
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Prompt Templates</span>
+            <div style="display: flex; gap: 8px;">
+              <button class="btn btn-sm btn-secondary" onclick="loadPrompts()">Load</button>
+              <button class="btn btn-sm btn-ghost" onclick="clearPromptCache()">Clear Cache</button>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="form-group" style="margin-bottom: 12px;">
+              <label class="form-label">Select Prompt</label>
+              <select id="promptSelect" onchange="onPromptSelect()" style="width: 100%;">
+                <option value="">-- Load prompts first --</option>
+              </select>
+            </div>
+            <div id="promptVarsBox" style="margin-bottom: 12px; display: none;">
+              <label class="form-label">Available Variables <span style="color: var(--muted); font-size: 11px;">(click to insert)</span></label>
+              <div id="promptVarButtons" style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px;"></div>
+            </div>
+            <div class="form-group" style="margin-bottom: 12px;">
+              <label class="form-label">Template</label>
+              <textarea id="promptTemplate" rows="14" style="font-family: var(--mono); font-size: 12px; width: 100%;"></textarea>
+            </div>
+            <div style="display: flex; gap: 8px; justify-content: flex-end;">
+              <button class="btn btn-primary" onclick="savePrompt()">Save Prompt</button>
             </div>
           </div>
         </div>
@@ -1091,94 +1265,6 @@ HTML = r"""
           </div>
         </div>
 
-        <!-- Sessions -->
-        <div class="card">
-          <div class="card-header">
-            <span class="card-title">Recent Sessions</span>
-            <div style="display: flex; gap: 8px; align-items: center;">
-              <input type="number" id="admLimit" value="20" style="width: 60px;" />
-              <input type="number" id="admOffset" value="0" style="width: 60px;" />
-              <button class="btn btn-sm btn-secondary" onclick="fetchAdminSessions()">Load</button>
-            </div>
-          </div>
-          <div class="card-body">
-            <div id="admSessionsBox" style="overflow: auto; max-height: 300px;">
-              <div style="color: var(--muted); font-size: 13px;">Click Load to fetch sessions</div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Config Management -->
-        <div class="card">
-          <div class="card-header">
-            <span class="card-title">Config Settings</span>
-            <div style="display: flex; gap: 8px;">
-              <button class="btn btn-sm btn-secondary" onclick="loadConfigs()">Load</button>
-              <button class="btn btn-sm btn-ghost" onclick="clearConfigCache()">Clear Cache</button>
-            </div>
-          </div>
-          <div class="card-body">
-            <div id="configTableBox" style="overflow-x: auto; max-height: 400px;">
-              <div style="color: var(--muted); font-size: 13px;">Click Load to fetch configs</div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Prompts Management -->
-        <div class="card">
-          <div class="card-header">
-            <span class="card-title">Prompt Templates</span>
-            <div style="display: flex; gap: 8px;">
-              <button class="btn btn-sm btn-secondary" onclick="loadPrompts()">Load</button>
-              <button class="btn btn-sm btn-ghost" onclick="clearPromptCache()">Clear Cache</button>
-            </div>
-          </div>
-          <div class="card-body">
-            <div class="form-group" style="margin-bottom: 12px;">
-              <label class="form-label">Select Prompt</label>
-              <select id="promptSelect" onchange="onPromptSelect()" style="width: 100%;">
-                <option value="">-- Load prompts first --</option>
-              </select>
-            </div>
-            <div id="promptVarsBox" style="margin-bottom: 12px; display: none;">
-              <label class="form-label">Available Variables <span style="color: var(--muted); font-size: 11px;">(click to insert)</span></label>
-              <div id="promptVarButtons" style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px;"></div>
-            </div>
-            <div class="form-group" style="margin-bottom: 12px;">
-              <label class="form-label">Template</label>
-              <textarea id="promptTemplate" rows="14" style="font-family: var(--mono); font-size: 12px; width: 100%;"></textarea>
-            </div>
-            <div style="display: flex; gap: 8px; justify-content: flex-end;">
-              <button class="btn btn-primary" onclick="savePrompt()">Save Prompt</button>
-            </div>
-          </div>
-        </div>
-
-        <!-- Quick Test -->
-        <div class="card">
-          <div class="card-header">
-            <span class="card-title">Quick Test</span>
-          </div>
-          <div class="card-body">
-            <p style="font-size: 13px; color: var(--muted); margin-bottom: 12px;">세션 생성 → 랜덤 답변 제출 → 세션 종료를 자동으로 실행합니다.</p>
-            <div class="form-row">
-              <div class="form-group" style="flex: 2;">
-                <label class="form-label">방문자 이름</label>
-                <input type="text" id="quickTestName" value="QuickTest" />
-              </div>
-              <div class="form-group" style="flex: 1;">
-                <label class="form-label">답변 수</label>
-                <input type="number" id="quickTestCount" value="5" min="1" max="10" />
-              </div>
-              <div class="form-group" style="flex: 0;">
-                <label class="form-label">&nbsp;</label>
-                <button class="btn btn-primary" onclick="runQuickTest()">Run Test</button>
-              </div>
-            </div>
-            <div id="quickTestResult" style="display: none; margin-top: 12px; padding: 12px; background: var(--secondary); border-radius: 8px; font-size: 12px; font-family: var(--mono);"></div>
-          </div>
-        </div>
-
         <!-- Current Persona -->
         <div class="card">
           <div class="card-header">
@@ -1195,38 +1281,6 @@ HTML = r"""
             </div>
           </div>
         </div>
-
-        <!-- Questions List -->
-        <div class="card">
-          <div class="card-header">
-            <span class="card-title">Questions</span>
-            <div style="display: flex; gap: 8px; align-items: center;">
-              <label class="checkbox" style="font-size: 12px;"><input type="checkbox" id="questionsEnabledOnly" /> enabled only</label>
-              <input type="number" id="questionsLimit" value="20" style="width: 50px;" placeholder="limit" />
-              <input type="number" id="questionsOffset" value="0" style="width: 50px;" placeholder="offset" />
-              <button class="btn btn-sm btn-secondary" onclick="loadQuestions()">Load</button>
-            </div>
-          </div>
-          <div class="card-body">
-            <div id="questionsBox" style="overflow: auto; max-height: 350px;">
-              <div style="color: var(--muted); font-size: 13px;">Click Load to fetch questions</div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Growth Stages -->
-        <div class="card">
-          <div class="card-header">
-            <span class="card-title">Growth Stages</span>
-            <button class="btn btn-sm btn-secondary" onclick="loadGrowthStages()">Load</button>
-          </div>
-          <div class="card-body">
-            <div id="growthStagesBox" style="overflow: auto; max-height: 300px;">
-              <div style="color: var(--muted); font-size: 13px;">Click Load to fetch growth stages</div>
-            </div>
-          </div>
-        </div>
-
       </section>
 
       <!-- Debug Section -->
@@ -1254,6 +1308,10 @@ HTML = r"""
   let lastQuestionId = null;
   let currentIdleId = null;    // 현재 선택된 idle ID
   let currentIdleText = null;  // 현재 선택된 혼잣말 텍스트
+  let talkTurnCount = 0;       // 현재 세션 대화 턴 수
+  let nudgeTimerId = null;     // auto-nudge 타이머 ID
+  let nudgeFiredThisTurn = false; // 현재 턴에서 nudge 발동 여부
+  const NUDGE_TIMEOUT = 15000; // 15초
 
   // Elements
   const statusDot = document.getElementById('statusDot');
@@ -1503,6 +1561,31 @@ HTML = r"""
     showSpinner(false);
   }
 
+  async function testNudge() {
+    if (!sessionId) {
+      toast('Talk 세션이 필요합니다. Talk 탭에서 대화를 시작하세요.', 'error');
+      return;
+    }
+    showSpinner(true);
+    const model = document.getElementById('monologueModel').value;
+    try {
+      const data = await fetchJson('/monologue/nudge', {
+        method: 'POST',
+        body: JSON.stringify({ session_id: sessionId, model: model })
+      });
+      document.getElementById('idleStageInfo').textContent = `session: ${data.session_id} | idle_id: ${data.idle_id}`;
+      document.getElementById('idleResultText').textContent = data.nudge_text;
+      document.getElementById('idleResultBox').style.display = 'block';
+      document.getElementById('btnGoToTalk').style.display = 'none';
+      log({ endpoint: '/monologue/nudge', data });
+      toast('Nudge generated', 'success', 2000);
+    } catch (e) {
+      toast(`Nudge failed: ${e.message}`, 'error');
+      log({ error: e.message });
+    }
+    showSpinner(false);
+  }
+
   // Talk 섹션으로 이동
   function goToTalk() {
     if (!currentIdleId) {
@@ -1513,6 +1596,45 @@ HTML = r"""
   }
 
   // Talk (대화)
+  // Auto-nudge 타이머 관리
+  function clearNudgeTimer() {
+    if (nudgeTimerId) {
+      clearTimeout(nudgeTimerId);
+      nudgeTimerId = null;
+    }
+  }
+
+  function startNudgeTimer() {
+    clearNudgeTimer();
+    // 이미 이번 턴에서 nudge 발동했으면 타이머 시작 안 함
+    if (nudgeFiredThisTurn) return;
+    nudgeTimerId = setTimeout(async () => {
+      if (!sessionId || !currentIdleId) return;
+      // 자동 nudge 발동
+      toast('15초간 응답 없음 - Nudge 발동', 'info', 2000);
+      await triggerAutoNudge();
+    }, NUDGE_TIMEOUT);
+  }
+
+  async function triggerAutoNudge() {
+    if (!sessionId) return;
+    nudgeFiredThisTurn = true; // 이번 턴에서 nudge 발동 표시
+    const model = document.getElementById('talkModel').value;
+    try {
+      const data = await fetchJson('/monologue/nudge', {
+        method: 'POST',
+        body: JSON.stringify({ session_id: sessionId, model: model })
+      });
+      addChatMessage('system', '[auto-nudge]');
+      addChatMessage('assistant', data.nudge_text);
+      log({ endpoint: '/monologue/nudge (auto)', data });
+      // 턴당 1회만 발동하므로 타이머 재시작 안 함
+    } catch (e) {
+      toast(`Auto-nudge failed: ${e.message}`, 'error');
+      log({ error: e.message });
+    }
+  }
+
   function addChatMessage(role, text) {
     const el = document.createElement('div');
     el.className = 'message ' + role;
@@ -1569,8 +1691,18 @@ HTML = r"""
       addChatMessage('system', `[혼잣말] ${data.idle_text}`);
       addChatMessage('assistant', data.assistant_first_text);
 
+      // 턴 카운트 초기화
+      talkTurnCount = 1;
+      document.getElementById('talkTurnBadge').textContent = `Turn: ${talkTurnCount}`;
+      document.getElementById('talkPolicyBadge').style.display = 'none';
+      document.getElementById('talkStatusText').textContent = '';
+
       log({ endpoint: '/talk/start', data });
       toast('Talk started', 'success', 2000);
+
+      // auto-nudge 타이머 시작
+      nudgeFiredThisTurn = false;
+      startNudgeTimer();
     } catch (e) {
       toast(`Talk start failed: ${e.message}`, 'error');
       log({ error: e.message });
@@ -1587,6 +1719,9 @@ HTML = r"""
       toast('세션이 없습니다', 'error');
       return;
     }
+
+    // 새 턴 시작 - nudge 플래그 리셋
+    nudgeFiredThisTurn = false;
 
     input.value = '';
     addChatMessage('user', userText);
@@ -1607,6 +1742,20 @@ HTML = r"""
       addChatMessage('assistant', data.ui_text);
       log({ endpoint: '/talk/turn', data });
 
+      // 턴 카운트 증가
+      talkTurnCount++;
+      document.getElementById('talkTurnBadge').textContent = `Turn: ${talkTurnCount}`;
+
+      // 정책 가이드 표시
+      if (data.policy_category) {
+        document.getElementById('talkPolicyBadge').style.display = 'inline-block';
+        document.getElementById('talkPolicyBadge').textContent = `정책: ${data.policy_category}`;
+        document.getElementById('talkStatusText').textContent = '정책 가이드가 LLM에 주입됨';
+      } else {
+        document.getElementById('talkPolicyBadge').style.display = 'none';
+        document.getElementById('talkStatusText').textContent = '';
+      }
+
       // 글로벌 예고 표시
       if (data.warning_text) {
         document.getElementById('globalWarningBox').style.display = 'block';
@@ -1617,9 +1766,14 @@ HTML = r"""
       if (data.global_ended) {
         addChatMessage('system', '🔴 사노의 시간이 모두 끝났습니다.');
         document.getElementById('talkInput').disabled = true;
+        clearNudgeTimer();
         toast('글로벌 엔딩 - 사노 종료', 'error');
       } else if (data.should_end) {
         addChatMessage('system', '대화가 종료되었습니다.');
+        clearNudgeTimer();
+      } else {
+        // 대화 계속 - 타이머 리셋
+        startNudgeTimer();
       }
     } catch (e) {
       toast(`Talk turn failed: ${e.message}`, 'error');
@@ -1653,6 +1807,8 @@ HTML = r"""
       addChatMessage('system', '[nudge]');
       addChatMessage('assistant', data.nudge_text);
       log({ endpoint: '/monologue/nudge', data });
+      // 수동 nudge 후 타이머 리셋
+      startNudgeTimer();
     } catch (e) {
       toast(`Nudge failed: ${e.message}`, 'error');
       log({ error: e.message });
@@ -1661,12 +1817,20 @@ HTML = r"""
   }
 
   function endTalk() {
+    // 타이머 정리
+    clearNudgeTimer();
+    nudgeFiredThisTurn = false;
+
     document.getElementById('talkChatArea').style.display = 'none';
     document.getElementById('btnStartTalk').style.display = 'inline-block';
     document.getElementById('chatMessages').innerHTML = '<div class="message system">대화가 시작되면 여기에 표시됩니다</div>';
     currentIdleId = null;
     currentIdleText = null;
+    talkTurnCount = 0;
     document.getElementById('selectedIdleText').textContent = '혼잣말을 선택하세요 (Formation → Idle Random)';
+    document.getElementById('talkTurnBadge').textContent = 'Turn: 0';
+    document.getElementById('talkPolicyBadge').style.display = 'none';
+    document.getElementById('talkStatusText').textContent = '';
     toast('Talk ended', 'success', 2000);
   }
 
@@ -2212,6 +2376,127 @@ HTML = r"""
     showSpinner(false);
   }
 
+  // Policy Rules
+  async function loadPolicyRules() {
+    const enabledOnly = document.getElementById('policyEnabledOnly').checked;
+
+    showSpinner(true);
+    try {
+      const data = await fetchJson(`/admin/policy-rules?enabled_only=${enabledOnly}`);
+
+      const box = document.getElementById('policyRulesBox');
+      if (!data.items || data.items.length === 0) {
+        box.innerHTML = '<div style="color: var(--muted);">No policy rules found</div>';
+        showSpinner(false);
+        return;
+      }
+
+      let html = `<div style="margin-bottom: 8px; font-size: 12px; color: var(--muted);">Total: ${data.total}</div>`;
+      html += `<table style="width: 100%; font-size: 11px;"><thead><tr>
+        <th style="padding: 6px;">ID</th>
+        <th style="padding: 6px;">Category</th>
+        <th style="padding: 6px;">Keywords</th>
+        <th style="padding: 6px;">Action</th>
+        <th style="padding: 6px;">Pri</th>
+        <th style="padding: 6px;">Enabled</th>
+      </tr></thead><tbody>`;
+
+      for (const r of data.items) {
+        const keywordsShort = r.keywords.length > 30 ? r.keywords.substring(0, 30) + '...' : r.keywords;
+        const actionBadge = r.action === 'block' ? 'badge-danger' : r.action === 'crisis' ? 'badge-warning' : '';
+        html += `<tr style="border-bottom: 1px solid var(--border);">
+          <td style="padding: 6px; font-family: var(--mono);">${r.id}</td>
+          <td style="padding: 6px;">${escapeHtml(r.category)}</td>
+          <td style="padding: 6px; font-size: 10px; color: var(--muted); max-width: 150px;" title="${escapeHtml(r.keywords)}">${escapeHtml(keywordsShort)}</td>
+          <td style="padding: 6px;"><span class="badge ${actionBadge}">${r.action}</span></td>
+          <td style="padding: 6px; font-family: var(--mono);">${r.priority}</td>
+          <td style="padding: 6px;">
+            <button class="btn btn-sm ${r.enabled ? 'btn-primary' : 'btn-ghost'}" onclick="togglePolicyRule(${r.id})">${r.enabled ? 'ON' : 'OFF'}</button>
+          </td>
+        </tr>`;
+      }
+      html += '</tbody></table>';
+      box.innerHTML = html;
+
+      log({ endpoint: '/admin/policy-rules', total: data.total });
+      toast('Policy rules loaded', 'success', 2000);
+    } catch (e) {
+      toast(`Load policy rules failed: ${e.message}`, 'error');
+      log({ error: e.message });
+    }
+    showSpinner(false);
+  }
+
+  async function togglePolicyRule(id) {
+    try {
+      const data = await fetchJson(`/admin/policy-rules/${id}/toggle`, { method: 'PUT' });
+      toast(`Policy rule ${id} ${data.enabled ? 'enabled' : 'disabled'}`, 'success', 2000);
+      await loadPolicyRules();
+    } catch (e) {
+      toast(`Toggle failed: ${e.message}`, 'error');
+      log({ error: e.message });
+    }
+  }
+
+  // Idle List
+  async function loadIdleList() {
+    const limit = document.getElementById('idleLimit').value || 30;
+    const offset = document.getElementById('idleOffset').value || 0;
+    const enabledOnly = document.getElementById('idleEnabledOnly').checked;
+
+    showSpinner(true);
+    try {
+      const data = await fetchJson(`/admin/idle/list?limit=${limit}&offset=${offset}&enabled_only=${enabledOnly}`);
+
+      const box = document.getElementById('idleListBox');
+      if (!data.items || data.items.length === 0) {
+        box.innerHTML = '<div style="color: var(--muted);">No idle items found</div>';
+        showSpinner(false);
+        return;
+      }
+
+      let html = `<div style="margin-bottom: 8px; font-size: 12px; color: var(--muted);">Total: ${data.total}</div>`;
+      html += `<table style="width: 100%; font-size: 11px;"><thead><tr>
+        <th style="padding: 6px;">ID</th>
+        <th style="padding: 6px;">Axis</th>
+        <th style="padding: 6px;">Text</th>
+        <th style="padding: 6px;">Enabled</th>
+      </tr></thead><tbody>`;
+
+      for (const item of data.items) {
+        const textShort = item.question_text.length > 50 ? item.question_text.substring(0, 50) + '...' : item.question_text;
+        html += `<tr style="border-bottom: 1px solid var(--border);">
+          <td style="padding: 6px; font-family: var(--mono);">${item.id}</td>
+          <td style="padding: 6px; font-size: 10px;">${escapeHtml(item.axis_key)}</td>
+          <td style="padding: 6px; font-size: 10px; max-width: 250px;" title="${escapeHtml(item.question_text)}">${escapeHtml(textShort)}</td>
+          <td style="padding: 6px;">
+            <button class="btn btn-sm ${item.enable ? 'btn-primary' : 'btn-ghost'}" onclick="toggleIdle(${item.id})">${item.enable ? 'ON' : 'OFF'}</button>
+          </td>
+        </tr>`;
+      }
+      html += '</tbody></table>';
+      box.innerHTML = html;
+
+      log({ endpoint: '/admin/idle/list', total: data.total, shown: data.items.length });
+      toast('Idle list loaded', 'success', 2000);
+    } catch (e) {
+      toast(`Load idle list failed: ${e.message}`, 'error');
+      log({ error: e.message });
+    }
+    showSpinner(false);
+  }
+
+  async function toggleIdle(id) {
+    try {
+      const data = await fetchJson(`/admin/idle/${id}/toggle`, { method: 'PUT' });
+      toast(`Idle ${id} ${data.enable ? 'enabled' : 'disabled'}`, 'success', 2000);
+      await loadIdleList();
+    } catch (e) {
+      toast(`Toggle failed: ${e.message}`, 'error');
+      log({ error: e.message });
+    }
+  }
+
   // Help Modal
   const HELP_CONTENT = {
     general: `
@@ -2246,6 +2531,8 @@ HTML = r"""
         <ul>
           <li><strong>Idle Greeting</strong>: 성장단계별 고정 인사말 (DB에서 로드)</li>
           <li><strong>Idle Monologue</strong>: LLM이 성장단계 스타일로 혼잣말 생성</li>
+          <li><strong>Idle Random</strong>: DB에서 가치축별 혼잣말 랜덤 선택 (Talk에서 사용)</li>
+          <li><strong>Nudge</strong>: 대화 중 사용자 반응이 없을 때 던지는 한마디 (Talk 세션 필요)</li>
         </ul>
         <p style="color: var(--muted); font-size: 12px;">* 성장단계는 총 답변 수(answered_total)에 따라 1~6단계로 나뉩니다.</p>
       </div>
@@ -2256,6 +2543,7 @@ HTML = r"""
         <p>사노의 혼잣말을 바탕으로 자유 대화를 나눌 수 있습니다.</p>
         <ul>
           <li><strong>혼잣말 선택</strong>: Formation → Idle Random으로 혼잣말을 먼저 생성하세요</li>
+          <li><strong>Auto-Nudge</strong>: 15초간 입력이 없으면 자동으로 사노가 먼저 말을 겁니다</li>
           <li><strong>Model 선택</strong>: 대화에 사용할 LLM 모델 선택
             <ul style="margin-top:4px; font-size:12px; color:var(--muted);">
               <li>gpt-4o-mini: 빠름, 저렴</li>
@@ -2280,7 +2568,7 @@ HTML = r"""
     admin: `
       <div class="help-section">
         <h4>⚙️ Admin (관리)</h4>
-        <p>시스템 상태 확인 및 데이터 관리 기능입니다.</p>
+        <p>시스템 상태 확인 및 제어 기능입니다.</p>
       </div>
       <div class="help-section">
         <h4>📊 Progress</h4>
@@ -2294,58 +2582,80 @@ HTML = r"""
         <h4>🎭 Persona Generate</h4>
         <p>365문항 완료 후 LLM으로 사노의 persona_prompt 생성</p>
         <ul>
-          <li><strong>Model</strong>: 사용할 GPT 모델 선택
-            <ul style="margin-top:4px; font-size:12px; color:var(--muted);">
-              <li>gpt-4o (균형) - 기본값</li>
-              <li>gpt-4o-mini (빠름, 저렴)</li>
-              <li>gpt-5-nano/mini (GPT-5 경량)</li>
-              <li>gpt-5.2 (최신 flagship)</li>
-            </ul>
-          </li>
-          <li><strong>Max Tokens</strong>: 생성할 페르소나 최대 토큰 (기본 8000)</li>
           <li><strong>force</strong>: 기존 persona가 있어도 재생성</li>
         </ul>
-        <p style="color: var(--muted); font-size: 12px;">* LLM 호출 실패 시 fallback 페르소나가 적용됩니다.</p>
       </div>
       <div class="help-section">
         <h4>⚡ Quick Test</h4>
         <p>빠른 테스트를 위한 자동화 기능</p>
         <ul>
           <li>세션 생성 → 지정 개수만큼 랜덤 답변 → 세션 종료</li>
-          <li>한 번에 여러 문항 테스트 가능</li>
         </ul>
       </div>
+    `,
+    data: `
       <div class="help-section">
-        <h4>🎭 Current Persona</h4>
-        <p>현재 저장된 사노의 페르소나 프롬프트 확인</p>
-        <ul>
-          <li>values_summary와 persona_prompt 표시</li>
-          <li>스크롤로 전체 내용 확인 가능</li>
-        </ul>
+        <h4>📊 Data (데이터 관리)</h4>
+        <p>사노의 콘텐츠 데이터를 확인하고 관리합니다.</p>
       </div>
       <div class="help-section">
         <h4>📋 Questions</h4>
-        <p>DB에 저장된 A/B 질문 목록 확인 및 관리</p>
+        <p>A/B 질문 목록 확인 및 활성화/비활성화 토글</p>
+      </div>
+      <div class="help-section">
+        <h4>💬 Idle List</h4>
+        <p>혼잣말 목록 확인 및 활성화/비활성화 토글</p>
+      </div>
+      <div class="help-section">
+        <h4>🛡️ Policy Rules</h4>
+        <p>정책 필터 규칙 확인 및 활성화/비활성화 토글</p>
         <ul>
-          <li>질문 활성화/비활성화 토글</li>
-          <li>value_a, value_b 확인</li>
+          <li>민감 주제(자해, 개인정보 등) 감지 키워드</li>
+          <li>action: redirect, block, crisis, privacy</li>
         </ul>
       </div>
       <div class="help-section">
         <h4>🌱 Growth Stages</h4>
-        <p>사노의 성장 단계별 설정 확인</p>
+        <p>사노의 성장 단계별 설정 확인 (6단계)</p>
+      </div>
+      <div class="help-section">
+        <h4>📁 Recent Sessions</h4>
+        <p>최근 세션 기록 조회</p>
+      </div>
+    `,
+    settings: `
+      <div class="help-section">
+        <h4>🔧 Settings (설정)</h4>
+        <p>시스템 설정 및 프롬프트 템플릿을 관리합니다.</p>
+      </div>
+      <div class="help-section">
+        <h4>⚙️ Config Settings</h4>
+        <p>DB에 저장된 설정값 조회 및 수정</p>
         <ul>
-          <li>6단계 성장 (씨앗 → 완성)</li>
-          <li>각 단계별 스타일, 인사말, 혼잣말 프롬프트 확인</li>
+          <li>임계값, 최대값, 모델 설정 등</li>
         </ul>
       </div>
       <div class="help-section">
-        <h4>📝 Config / Prompts</h4>
-        <p>DB에 저장된 설정값과 프롬프트 템플릿 관리</p>
+        <h4>📝 Prompt Templates</h4>
+        <p>LLM 프롬프트 템플릿 관리</p>
         <ul>
-          <li><strong>Config</strong>: 임계값, 최대값 등 시스템 설정</li>
-          <li><strong>Prompts</strong>: LLM 프롬프트 템플릿 (변수 클릭으로 삽입)</li>
+          <li>변수 클릭으로 삽입</li>
         </ul>
+      </div>
+      <div class="help-section">
+        <h4>📥 Import</h4>
+        <p>xlsx 파일로 데이터 일괄 업로드</p>
+        <ul>
+          <li>Questions, Settings, Idle</li>
+        </ul>
+      </div>
+      <div class="help-section">
+        <h4>🎯 Personality Values</h4>
+        <p>사노의 성격 값 직접 조회/수정</p>
+      </div>
+      <div class="help-section">
+        <h4>🎭 Current Persona</h4>
+        <p>현재 저장된 페르소나 프롬프트 확인</p>
       </div>
     `,
     debug: `

@@ -7,11 +7,9 @@ from __future__ import annotations
 from typing import Optional
 
 from sqlalchemy.orm import Session
-from sqlalchemy import text
 
-from schemas.common import Status
-from routers.talk_policy import moderate_text, generate_policy_response, Action
-from util.utils import trim, get_prompt
+from routers.talk_policy import moderate_text
+from util.utils import get_prompt
 
 
 OUTPUT_LIMIT = 150
@@ -31,14 +29,16 @@ _DEFAULT_POLICY_GUIDE = """[정책 안내]
 - "할 수 없어", "다룰 수 없어" 같은 거부 표현 금지"""
 
 
-def get_policy_guide(db: Session, text_for_check: str) -> Optional[str]:
+def get_policy_guide(db: Session, text_for_check: str) -> tuple[Optional[str], Optional[str]]:
     """
     정책 매칭 시 LLM 프롬프트에 주입할 가이드 텍스트 반환.
-    매칭 없으면 None 반환.
+
+    Returns:
+        (guide_text, category) 또는 (None, None)
     """
     hit = moderate_text(db, text_for_check)
     if not hit:
-        return None
+        return None, None
 
     rule, _kw = hit
 
@@ -58,7 +58,7 @@ def get_policy_guide(db: Session, text_for_check: str) -> Optional[str]:
             fallback_message=rule.fallback_message,
         )
 
-    return guide
+    return guide, rule.category
 
 
 def apply_policy_guard(db: Session, text_for_check: str, user_text: str = ""):

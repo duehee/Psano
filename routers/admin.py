@@ -633,13 +633,14 @@ def admin_reset(req: AdminResetRequest, db: Session = Depends(get_db)):
                 db.execute(text("""
                     UPDATE psano_state
                     SET phase = 'teach', current_question = 1,
-                        formed_at = NULL, persona_prompt = NULL, values_summary = NULL
+                        formed_at = NULL, persona_prompt = NULL, values_summary = NULL,
+                        global_turn_count = 0
                     WHERE id = 1
                 """))
             except Exception:
                 db.execute(text("""
                     UPDATE psano_state
-                    SET phase = 'teach', current_question = 1
+                    SET phase = 'teach', current_question = 1, global_turn_count = 0
                     WHERE id = 1
                 """))
 
@@ -650,6 +651,7 @@ def admin_reset(req: AdminResetRequest, db: Session = Depends(get_db)):
                 GLOBAL_STATE["formed_at"] = None
                 GLOBAL_STATE["persona_prompt"] = None
                 GLOBAL_STATE["values_summary"] = None
+                GLOBAL_STATE["global_turn_count"] = 0
 
         db.commit()
         return AdminResetResponse(
@@ -1495,6 +1497,97 @@ def admin_idle_toggle(
         db.commit()
 
         return {"ok": True, "id": idle_id, "enable": bool(new_enable)}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"db error: {e}")
+
+
+# ──────────────────────────────────────────────────────────────
+# Policy Rules 관리
+# ──────────────────────────────────────────────────────────────
+
+@router.get("/policy-rules")
+def admin_policy_rules_list(
+    db: Session = Depends(get_db),
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    enabled_only: bool = Query(False),
+):
+    """
+    GET /admin/policy-rules
+    psano_policy_rules 목록 조회
+    """
+    try:
+        where_clause = "WHERE enabled = TRUE" if enabled_only else ""
+
+        total_row = db.execute(
+            text(f"SELECT COUNT(*) AS cnt FROM psano_policy_rules {where_clause}")
+        ).mappings().first()
+        total = int(total_row["cnt"]) if total_row else 0
+
+        rows = db.execute(
+            text(f"""
+                SELECT id, category, keywords, is_regex, action, priority,
+                       fallback_message, should_end, enabled
+                FROM psano_policy_rules
+                {where_clause}
+                ORDER BY priority DESC, id ASC
+                LIMIT :limit OFFSET :offset
+            """),
+            {"limit": limit, "offset": offset}
+        ).mappings().all()
+
+        items = [{
+            "id": int(r["id"]),
+            "category": r["category"] or "",
+            "keywords": r["keywords"] or "",
+            "is_regex": bool(r["is_regex"]),
+            "action": r["action"] or "redirect",
+            "priority": int(r["priority"] or 50),
+            "fallback_message": r["fallback_message"] or "",
+            "should_end": bool(r["should_end"]),
+            "enabled": bool(r["enabled"]),
+        } for r in rows]
+
+        return {"total": total, "items": items}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"db error: {e}")
+
+
+@router.put("/policy-rules/{rule_id}/toggle")
+def admin_policy_rule_toggle(
+    rule_id: int,
+    db: Session = Depends(get_db),
+):
+    """
+    PUT /admin/policy-rules/{rule_id}/toggle
+    enabled 토글
+    """
+    try:
+        row = db.execute(
+            text("SELECT id, enabled FROM psano_policy_rules WHERE id = :id"),
+            {"id": rule_id}
+        ).mappings().first()
+
+        if not row:
+            raise HTTPException(status_code=404, detail=f"policy rule not found: {rule_id}")
+
+        new_enabled = not bool(row["enabled"])
+        db.execute(
+            text("UPDATE psano_policy_rules SET enabled = :enabled WHERE id = :id"),
+            {"id": rule_id, "enabled": new_enabled}
+        )
+        db.commit()
+
+        # 캐시 클리어 (talk_policy에서 import)
+        from routers.talk_policy import clear_cache
+        clear_cache()
+
+        return {"ok": True, "id": rule_id, "enabled": new_enabled}
 
     except HTTPException:
         raise

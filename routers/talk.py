@@ -7,6 +7,7 @@ from util.utils import trim, summary_to_text, get_prompt, get_config
 from util.constants import DEFAULT_GLOBAL_TURN_MAX, DEFAULT_GLOBAL_WARNING_START
 import random
 import json
+import re
 
 from schemas.talk import (
     TalkStartRequest,
@@ -221,9 +222,6 @@ def _parse_assistant_and_memory(raw: str) -> tuple[str, str]:
     1. ASSISTANT: ... / MEMORY: ... (기존)
     2. JSON: {"assistant": "...", "memory": "..."} (백틱 포함 가능)
     """
-    import json
-    import re
-
     raw = (raw or "").strip()
     if not raw:
         return "", ""
@@ -464,7 +462,7 @@ def talk_turn(req: TalkTurnRequest, db: Session = Depends(get_db)):
     idle_ctx, _ = _idle_context(db, int(sess["idle_id"]))
 
     # 5) 정책 가이드 확인 (매칭 시 LLM 프롬프트에 주입)
-    policy_guide = get_policy_guide(db, user_text)
+    policy_guide, policy_category = get_policy_guide(db, user_text)
 
     # 6) 세션 메모 + 최근 턴 로드
     session_memory = trim(sess.get("idle_talk_memory") or "", MEMORY_LIMIT)
@@ -544,6 +542,7 @@ def talk_turn(req: TalkTurnRequest, db: Session = Depends(get_db)):
         "status": status,
         "ui_text": assistant_text,
         "fallback_code": fallback_code,
+        "policy_category": policy_category,
         "warning_text": warning_text,
         "global_ended": False,
     }
