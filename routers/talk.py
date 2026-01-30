@@ -163,12 +163,24 @@ def _build_turn_prompt(
     user_text: str,
     visitor_name: str = "",
     policy_guide: str | None = None,
+    local_warning: str | None = None,
+    ask_continue: bool = False,
 ) -> str:
     """대화 턴 프롬프트 생성"""
     persona = persona or "You are Psano."
     summary_text = summary_to_text(summary)
     visitor_name = (visitor_name or "").strip()
     policy_section = f"\n{policy_guide}\n" if policy_guide else ""
+    local_warning_section = f"\n{local_warning}\n" if local_warning else ""
+    ask_continue_section = ""
+    if ask_continue:
+        ask_continue_section = """
+[대화 지속 확인]
+이번 응답 끝에 관람객에게 대화를 계속할 의향이 있는지 자연스럽게 물어보세요.
+예시: "...더 이야기해볼까?", "...계속 나눠볼래?", "...여기서 멈출까, 아니면 더?"
+- 강요하지 말고 부드럽게
+- 사노의 말투를 유지하면서
+"""
 
     mem = trim(session_memory or "", MEMORY_LIMIT)
     recent = (recent_turns or "").strip()
@@ -188,6 +200,8 @@ def _build_turn_prompt(
             output_limit=OUTPUT_LIMIT,
             memory_limit=MEMORY_LIMIT,
             policy_guide=policy_section,
+            local_warning=local_warning_section,
+            ask_continue=ask_continue_section,
         )
 
     # fallback: 하드코딩 프롬프트
@@ -200,6 +214,8 @@ def _build_turn_prompt(
         f"{visitor_section}"
         f"{idle_ctx}\n"
         f"{policy_section}"
+        f"{local_warning_section}"
+        f"{ask_continue_section}"
         f"[session_memory]\n{mem}\n\n"
         f"[recent_turns]\n{recent}\n\n"
         "규칙:\n"
@@ -455,6 +471,38 @@ def talk_turn(req: TalkTurnRequest, db: Session = Depends(get_db)):
             detail="talk not started for this session. call POST /talk/start first.",
         )
 
+    # 2.5) 로컬 엔딩 체크
+    idle_turn_count = int(sess.get("idle_turn_count") or 0)
+    local_end_turn_count = get_config(db, "local_end_turn_count", 50)
+    local_warning_threshold = get_config(db, "local_warning_threshold", 5)
+    remaining_turns = local_end_turn_count - idle_turn_count
+
+    # 로컬 토큰 소진 → 즉시 종료 (엔딩 멘트 없음)
+    if remaining_turns <= 0:
+        return {
+            "status": Status.ok,
+            "ui_text": "",
+            "fallback_code": None,
+            "policy_category": None,
+            "should_end": True,
+            "warning_text": None,
+            "global_ended": False,
+        }
+
+    # 로컬 예고 (잔여 ≤ threshold)
+    local_warning = None
+    if remaining_turns <= local_warning_threshold:
+        local_warning = f"""[세션 종료 임박]
+이 대화가 곧 끝나갑니다. (잔여: {remaining_turns}턴)
+자연스럽게 마무리 어조를 사용하세요:
+- "이쯤에서", "여기까지", "지금쯤이면" 등의 표현
+- 대화를 정리하는 듯한 톤
+- 급하게 끝내지 말고 자연스럽게"""
+
+    # N턴마다 "더 할래?" 질문 트리거
+    local_ask_interval = get_config(db, "local_ask_interval", 10)
+    ask_continue = (idle_turn_count > 0 and idle_turn_count % local_ask_interval == 0)
+
     # 3) 입력 길이 제한
     user_text = trim(req.user_text, INPUT_LIMIT)
 
@@ -479,6 +527,8 @@ def talk_turn(req: TalkTurnRequest, db: Session = Depends(get_db)):
         user_text=user_text,
         visitor_name=sess.get("visitor_name") or "",
         policy_guide=policy_guide,
+        local_warning=local_warning,
+        ask_continue=ask_continue,
     )
 
     # 8) LLM 호출
@@ -538,11 +588,15 @@ def talk_turn(req: TalkTurnRequest, db: Session = Depends(get_db)):
     )
     db.commit()
 
+    # 이번 턴 후 잔여 턴 (턴카운트가 방금 +1 됨)
+    should_end = (remaining_turns - 1) <= 0
+
     return {
         "status": status,
         "ui_text": assistant_text,
         "fallback_code": fallback_code,
         "policy_category": policy_category,
+        "should_end": should_end,
         "warning_text": warning_text,
         "global_ended": False,
     }

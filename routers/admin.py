@@ -163,7 +163,7 @@ async def admin_questions_import(
 
     try:
         wb = load_workbook(filename=BytesIO(content), data_only=True)
-        ws = wb.active
+        ws = _get_sheet(wb, ["question", "questions"]) or wb.active
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid xlsx file: {e}")
 
@@ -396,11 +396,11 @@ async def admin_settings_import(
 
 # 컬럼 매핑 (idle 시트)
 # A: id, B: axis_key, C: question_text, D: value, E: enable
-IDLE_COL_ID = "A"
-IDLE_COL_AXIS_KEY = "B"
-IDLE_COL_QUESTION_TEXT = "C"
-IDLE_COL_VALUE = "D"
-IDLE_COL_ENABLE = "E"
+I_COL_ID = "A"
+I_COL_AXIS_KEY = "B"
+I_COL_QUESTION_TEXT = "C"
+I_COL_VALUE = "D"
+I_COL_ENABLE = "E"
 
 @router.post("/idle/import", response_model=AdminQuestionsImportResponse)
 async def admin_idle_import(
@@ -421,7 +421,7 @@ async def admin_idle_import(
 
     try:
         wb = load_workbook(filename=BytesIO(content), data_only=True)
-        ws = wb.active
+        ws = _get_sheet(wb, ["idle", "monologue", "혼잣말"]) or wb.active
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid xlsx file: {e}")
 
@@ -441,9 +441,9 @@ async def admin_idle_import(
 
     try:
         for r in range(2, ws.max_row + 1):
-            id_val = _cell_int(ws, IDLE_COL_ID, r)
-            axis_ko = _cell_str(ws, IDLE_COL_AXIS_KEY, r)
-            question_text = _cell_str(ws, IDLE_COL_QUESTION_TEXT, r)
+            id_val = _cell_int(ws, I_COL_ID, r)
+            axis_ko = _cell_str(ws, I_COL_AXIS_KEY, r)
+            question_text = _cell_str(ws, I_COL_QUESTION_TEXT, r)
 
             # 빈 행 스킵
             if id_val is None and axis_ko == "" and question_text == "":
@@ -455,8 +455,8 @@ async def admin_idle_import(
             axis_key = _map_axis_key(axis_ko)
 
             # value는 VARCHAR이므로 문자열로 처리
-            value = _cell_str(ws, IDLE_COL_VALUE, r) or ""
-            enable_raw = _cell_str(ws, IDLE_COL_ENABLE, r)
+            value = _cell_str(ws, I_COL_VALUE, r) or ""
+            enable_raw = _cell_str(ws, I_COL_ENABLE, r)
             enable = _parse_enabled(enable_raw)
 
             # 필수값 검증
@@ -506,6 +506,148 @@ async def admin_idle_import(
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Import failed: {e}")
+
+
+# =========================
+# Policy Rules Excel Import
+# =========================
+
+# 컬럼 매핑 (policy_rules 시트)
+# A: 순서(id), B: 주제_한글, C: 키워드, D: 정규식_여부, E: 액션, F: 우선순위, G: 메세지, H: 즉시_완료, I: 활성화
+P_COL_ID = "A"
+P_COL_CATEGORY = "B"
+P_COL_KEYWORDS = "C"
+P_COL_IS_REGEX = "D"
+P_COL_ACTION = "E"
+P_COL_PRIORITY = "F"
+P_COL_MESSAGE = "G"
+P_COL_SHOULD_END = "H"
+P_COL_ENABLED = "I"
+
+
+@router.post("/policy-rules/import", response_model=AdminQuestionsImportResponse)
+async def admin_policy_rules_import(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    """
+    POST /admin/policy-rules/import
+    xlsx 업로드로 psano_policy_rules upsert.
+    컬럼: 순서, 주제_한글, 키워드, 정규식_여부, 액션, 우선순위, 메세지, 즉시_완료, 활성화
+    """
+
+    if not file.filename.lower().endswith(".xlsx"):
+        raise HTTPException(status_code=400, detail="Only .xlsx files are supported")
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Empty file")
+
+    try:
+        wb = load_workbook(filename=BytesIO(content), data_only=True)
+        ws = _get_sheet(wb, ["policy", "policy_rules", "rules", "정책"]) or wb.active
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid xlsx file: {e}")
+
+    result = AdminQuestionsImportResponse()
+
+    # id(순서)로 upsert
+    upsert_sql = text("""
+        INSERT INTO psano_policy_rules
+            (id, category, keywords, is_regex, action, priority, fallback_message, should_end, enabled)
+        VALUES
+            (:id, :category, :keywords, :is_regex, :action, :priority, :fallback_message, :should_end, :enabled)
+        ON DUPLICATE KEY UPDATE
+            category = VALUES(category),
+            keywords = VALUES(keywords),
+            is_regex = VALUES(is_regex),
+            action = VALUES(action),
+            priority = VALUES(priority),
+            fallback_message = VALUES(fallback_message),
+            should_end = VALUES(should_end),
+            enabled = VALUES(enabled)
+    """)
+
+    try:
+        for r in range(2, ws.max_row + 1):
+            id_val = _cell_int(ws, P_COL_ID, r)
+            category = _cell_str(ws, P_COL_CATEGORY, r)
+            keywords = _cell_str(ws, P_COL_KEYWORDS, r)
+            is_regex_raw = _cell_str(ws, P_COL_IS_REGEX, r)
+            action = _cell_str(ws, P_COL_ACTION, r)
+            priority_val = _cell_int(ws, P_COL_PRIORITY, r)
+            fallback_message = _cell_str(ws, P_COL_MESSAGE, r)
+            should_end_raw = _cell_str(ws, P_COL_SHOULD_END, r)
+            enabled_raw = _cell_str(ws, P_COL_ENABLED, r)
+
+            # 빈 행 스킵
+            if id_val is None and not category and not keywords:
+                continue
+
+            result.processed += 1
+
+            # 필수값 검증
+            if id_val is None:
+                result.failed += 1
+                result.errors.append(ImportErrorItem(row=r, message="Missing id (A column)"))
+                continue
+
+            if not category:
+                result.failed += 1
+                result.errors.append(ImportErrorItem(row=r, message="Missing category (B column)"))
+                continue
+
+            if not keywords:
+                result.failed += 1
+                result.errors.append(ImportErrorItem(row=r, message="Missing keywords (C column)"))
+                continue
+
+            # 0/1 파싱
+            is_regex = 1 if is_regex_raw in ("1", "Y", "y", "true", "True") else 0
+            should_end = 1 if should_end_raw in ("1", "Y", "y", "true", "True") else 0
+            enabled = 1 if enabled_raw in ("1", "Y", "y", "true", "True") else 0
+
+            # 기본값 처리
+            if not action:
+                action = "guide"
+            if priority_val is None:
+                priority_val = 50
+
+            params = {
+                "id": id_val,
+                "category": category,
+                "keywords": keywords,
+                "is_regex": is_regex,
+                "action": action,
+                "priority": priority_val,
+                "fallback_message": fallback_message or "",
+                "should_end": should_end,
+                "enabled": enabled,
+            }
+
+            res = db.execute(upsert_sql, params)
+            if res.rowcount == 1:
+                result.inserted += 1
+            elif res.rowcount == 2:
+                result.updated += 1
+            else:
+                result.unchanged += 1
+
+        db.commit()
+
+        # 캐시 클리어
+        try:
+            from routers.talk_policy import clear_cache
+            clear_cache()
+        except Exception:
+            pass
+
+        return result
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Import failed: {e}")
+
 
 # =========================
 # 세션/진행률 조회

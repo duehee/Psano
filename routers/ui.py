@@ -899,13 +899,19 @@ HTML = r"""
             </div>
             <!-- 채팅 영역 -->
             <div class="chat-container" id="talkChatArea" style="display: none;">
-              <!-- 턴 카운트 & 정책 표시 -->
-              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-                <div style="display: flex; gap: 8px; align-items: center;">
-                  <span class="badge" id="talkTurnBadge">Turn: 0</span>
-                  <span class="badge badge-warning" id="talkPolicyBadge" style="display: none;">정책 가이드 적용됨</span>
+              <!-- 턴 카운트 & 로컬 엔딩 정보 -->
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
+                <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                  <span class="badge" id="talkTurnBadge">Turn: 0/50</span>
+                  <span class="badge" id="talkRemainingBadge" style="background: #10b981; color: white;">남은 턴: 50</span>
+                  <span class="badge badge-warning" id="talkLocalWarningBadge" style="display: none;">종료 임박</span>
+                  <span class="badge" id="talkAskContinueBadge" style="display: none; background: #8b5cf6; color: white;">질문 트리거</span>
+                  <span class="badge badge-warning" id="talkPolicyBadge" style="display: none;">정책 가이드</span>
                 </div>
-                <span style="font-size: 11px; color: var(--muted);" id="talkStatusText"></span>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                  <span class="badge" id="talkTimeoutBadge" style="background: #6b7280; color: white;">타임아웃: --:--</span>
+                  <span style="font-size: 11px; color: var(--muted);" id="talkStatusText"></span>
+                </div>
               </div>
               <div class="chat-messages" id="chatMessages" style="height: 320px; overflow-y: auto; padding: 16px; background: var(--secondary); border-radius: 8px; margin-bottom: 12px;">
                 <div class="message system">대화가 시작되면 여기에 표시됩니다</div>
@@ -1190,7 +1196,7 @@ HTML = r"""
             <span class="card-title">Import</span>
           </div>
           <div class="card-body">
-            <div class="grid-3">
+            <div class="grid-2" style="gap: 16px;">
               <div class="form-group">
                 <label class="form-label">Questions (xlsx)</label>
                 <input type="file" id="admXlsxFile" accept=".xlsx" />
@@ -1205,6 +1211,11 @@ HTML = r"""
                 <label class="form-label">Idle (xlsx)</label>
                 <input type="file" id="admIdleXlsxFile" accept=".xlsx" />
                 <button class="btn btn-primary btn-sm" style="margin-top: 8px;" onclick="adminImportIdle()">Upload</button>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Policy Rules (xlsx)</label>
+                <input type="file" id="admPolicyRulesXlsxFile" accept=".xlsx" />
+                <button class="btn btn-primary btn-sm" style="margin-top: 8px;" onclick="adminImportPolicyRules()">Upload</button>
               </div>
             </div>
           </div>
@@ -1312,6 +1323,14 @@ HTML = r"""
   let nudgeTimerId = null;     // auto-nudge 타이머 ID
   let nudgeFiredThisTurn = false; // 현재 턴에서 nudge 발동 여부
   const NUDGE_TIMEOUT = 15000; // 15초
+
+  // 로컬 엔딩 관련
+  let localEndTurnCount = 50;      // 세션당 최대 턴 (config에서 로드)
+  let localWarningThreshold = 5;   // 예고 시작 잔여 턴
+  let localAskInterval = 10;       // N턴마다 질문
+  let sessionIdleTimeoutSec = 300; // 세션 타임아웃 (초)
+  let sessionTimeoutTimerId = null; // 세션 타임아웃 타이머 ID
+  let sessionTimeoutRemaining = 0;  // 남은 타임아웃 (초)
 
   // Elements
   const statusDot = document.getElementById('statusDot');
@@ -1635,6 +1654,105 @@ HTML = r"""
     }
   }
 
+  // 로컬 엔딩 config 로드
+  async function loadLocalEndingConfig() {
+    try {
+      const data = await fetchJson('/admin/config');
+      for (const cfg of data.configs || []) {
+        if (cfg.key === 'local_end_turn_count') localEndTurnCount = parseInt(cfg.value) || 50;
+        if (cfg.key === 'local_warning_threshold') localWarningThreshold = parseInt(cfg.value) || 5;
+        if (cfg.key === 'local_ask_interval') localAskInterval = parseInt(cfg.value) || 10;
+        if (cfg.key === 'session_idle_timeout_sec') sessionIdleTimeoutSec = parseInt(cfg.value) || 300;
+      }
+      log({ localEndingConfig: { localEndTurnCount, localWarningThreshold, localAskInterval, sessionIdleTimeoutSec } });
+    } catch (e) {
+      log({ error: 'Failed to load local ending config', message: e.message });
+    }
+  }
+
+  // 로컬 엔딩 UI 업데이트
+  function updateLocalEndingUI(turnCount) {
+    const remaining = localEndTurnCount - turnCount;
+
+    // 턴 카운트 배지
+    document.getElementById('talkTurnBadge').textContent = `Turn: ${turnCount}/${localEndTurnCount}`;
+
+    // 남은 턴 배지 (색상 변경)
+    const remainingBadge = document.getElementById('talkRemainingBadge');
+    remainingBadge.textContent = `남은 턴: ${remaining}`;
+    if (remaining <= 0) {
+      remainingBadge.style.background = '#ef4444'; // red
+    } else if (remaining <= localWarningThreshold) {
+      remainingBadge.style.background = '#f59e0b'; // orange
+    } else {
+      remainingBadge.style.background = '#10b981'; // green
+    }
+
+    // 종료 임박 배지
+    const warningBadge = document.getElementById('talkLocalWarningBadge');
+    if (remaining <= localWarningThreshold && remaining > 0) {
+      warningBadge.style.display = 'inline-block';
+    } else {
+      warningBadge.style.display = 'none';
+    }
+
+    // N턴마다 질문 배지
+    const askBadge = document.getElementById('talkAskContinueBadge');
+    if (turnCount > 0 && turnCount % localAskInterval === 0) {
+      askBadge.style.display = 'inline-block';
+    } else {
+      askBadge.style.display = 'none';
+    }
+  }
+
+  // 세션 타임아웃 타이머
+  let sessionTimeoutIntervalId = null;
+
+  function clearSessionTimeout() {
+    if (sessionTimeoutTimerId) {
+      clearTimeout(sessionTimeoutTimerId);
+      sessionTimeoutTimerId = null;
+    }
+    if (sessionTimeoutIntervalId) {
+      clearInterval(sessionTimeoutIntervalId);
+      sessionTimeoutIntervalId = null;
+    }
+  }
+
+  function startSessionTimeout() {
+    clearSessionTimeout();
+    sessionTimeoutRemaining = sessionIdleTimeoutSec;
+    updateTimeoutDisplay();
+
+    // 1초마다 카운트다운
+    sessionTimeoutIntervalId = setInterval(() => {
+      sessionTimeoutRemaining--;
+      updateTimeoutDisplay();
+      if (sessionTimeoutRemaining <= 0) {
+        clearSessionTimeout();
+        toast('세션 타임아웃 - 대화 종료', 'error');
+        endTalk();
+      }
+    }, 1000);
+  }
+
+  function updateTimeoutDisplay() {
+    const min = Math.floor(sessionTimeoutRemaining / 60);
+    const sec = sessionTimeoutRemaining % 60;
+    const display = `${min}:${sec.toString().padStart(2, '0')}`;
+    document.getElementById('talkTimeoutBadge').textContent = `타임아웃: ${display}`;
+
+    // 30초 이하면 빨간색
+    const badge = document.getElementById('talkTimeoutBadge');
+    if (sessionTimeoutRemaining <= 30) {
+      badge.style.background = '#ef4444';
+    } else if (sessionTimeoutRemaining <= 60) {
+      badge.style.background = '#f59e0b';
+    } else {
+      badge.style.background = '#6b7280';
+    }
+  }
+
   function addChatMessage(role, text) {
     const el = document.createElement('div');
     el.className = 'message ' + role;
@@ -1655,6 +1773,10 @@ HTML = r"""
     }
 
     showSpinner(true);
+
+    // 로컬 엔딩 config 로드
+    await loadLocalEndingConfig();
+
     const model = document.getElementById('talkModel').value;
 
     // 세션이 없으면 자동 생성 (대화기용 - 닉네임 기본값 사용)
@@ -1693,7 +1815,7 @@ HTML = r"""
 
       // 턴 카운트 초기화
       talkTurnCount = 1;
-      document.getElementById('talkTurnBadge').textContent = `Turn: ${talkTurnCount}`;
+      updateLocalEndingUI(talkTurnCount);
       document.getElementById('talkPolicyBadge').style.display = 'none';
       document.getElementById('talkStatusText').textContent = '';
 
@@ -1703,6 +1825,9 @@ HTML = r"""
       // auto-nudge 타이머 시작
       nudgeFiredThisTurn = false;
       startNudgeTimer();
+
+      // 세션 타임아웃 시작
+      startSessionTimeout();
     } catch (e) {
       toast(`Talk start failed: ${e.message}`, 'error');
       log({ error: e.message });
@@ -1742,9 +1867,9 @@ HTML = r"""
       addChatMessage('assistant', data.ui_text);
       log({ endpoint: '/talk/turn', data });
 
-      // 턴 카운트 증가
+      // 턴 카운트 증가 & 로컬 엔딩 UI 업데이트
       talkTurnCount++;
-      document.getElementById('talkTurnBadge').textContent = `Turn: ${talkTurnCount}`;
+      updateLocalEndingUI(talkTurnCount);
 
       // 정책 가이드 표시
       if (data.policy_category) {
@@ -1767,13 +1892,17 @@ HTML = r"""
         addChatMessage('system', '🔴 사노의 시간이 모두 끝났습니다.');
         document.getElementById('talkInput').disabled = true;
         clearNudgeTimer();
+        clearSessionTimeout();
         toast('글로벌 엔딩 - 사노 종료', 'error');
       } else if (data.should_end) {
-        addChatMessage('system', '대화가 종료되었습니다.');
+        addChatMessage('system', '🟡 로컬 엔딩 - 세션 토큰 소진');
         clearNudgeTimer();
+        clearSessionTimeout();
+        toast('로컬 엔딩 - 대화 종료', 'info');
       } else {
         // 대화 계속 - 타이머 리셋
         startNudgeTimer();
+        startSessionTimeout();
       }
     } catch (e) {
       toast(`Talk turn failed: ${e.message}`, 'error');
@@ -1809,6 +1938,7 @@ HTML = r"""
       log({ endpoint: '/monologue/nudge', data });
       // 수동 nudge 후 타이머 리셋
       startNudgeTimer();
+      startSessionTimeout();
     } catch (e) {
       toast(`Nudge failed: ${e.message}`, 'error');
       log({ error: e.message });
@@ -1819,6 +1949,7 @@ HTML = r"""
   function endTalk() {
     // 타이머 정리
     clearNudgeTimer();
+    clearSessionTimeout();
     nudgeFiredThisTurn = false;
 
     document.getElementById('talkChatArea').style.display = 'none';
@@ -1828,9 +1959,20 @@ HTML = r"""
     currentIdleText = null;
     talkTurnCount = 0;
     document.getElementById('selectedIdleText').textContent = '혼잣말을 선택하세요 (Formation → Idle Random)';
-    document.getElementById('talkTurnBadge').textContent = 'Turn: 0';
+
+    // 로컬 엔딩 UI 리셋
+    document.getElementById('talkTurnBadge').textContent = 'Turn: 0/50';
+    document.getElementById('talkRemainingBadge').textContent = '남은 턴: 50';
+    document.getElementById('talkRemainingBadge').style.background = '#10b981';
+    document.getElementById('talkLocalWarningBadge').style.display = 'none';
+    document.getElementById('talkAskContinueBadge').style.display = 'none';
     document.getElementById('talkPolicyBadge').style.display = 'none';
+    document.getElementById('talkTimeoutBadge').textContent = '타임아웃: --:--';
+    document.getElementById('talkTimeoutBadge').style.background = '#6b7280';
     document.getElementById('talkStatusText').textContent = '';
+    document.getElementById('globalWarningBox').style.display = 'none';
+    document.getElementById('talkInput').disabled = false;
+
     toast('Talk ended', 'success', 2000);
   }
 
@@ -1940,8 +2082,27 @@ HTML = r"""
     try {
       const data = await fetchMultipart('/admin/idle/import', fd);
       log({ endpoint: '/admin/idle/import', data });
+      toast(`Idle import: ${data.inserted} inserted, ${data.updated} updated`, 'success');
     } catch (e) {
       log({ error: e.message });
+      toast(`Idle import failed: ${e.message}`, 'error');
+    }
+  }
+
+  async function adminImportPolicyRules() {
+    const file = document.getElementById('admPolicyRulesXlsxFile').files[0];
+    if (!file) return log('No file selected');
+    const fd = new FormData();
+    fd.append('file', file);
+    try {
+      const data = await fetchMultipart('/admin/policy-rules/import', fd);
+      log({ endpoint: '/admin/policy-rules/import', data });
+      toast(`Policy Rules import: ${data.inserted} inserted, ${data.updated} updated`, 'success');
+      // Policy Rules 목록 새로고침
+      if (typeof loadPolicyRules === 'function') loadPolicyRules();
+    } catch (e) {
+      log({ error: e.message });
+      toast(`Policy Rules import failed: ${e.message}`, 'error');
     }
   }
 
@@ -2039,7 +2200,8 @@ HTML = r"""
           <th style="padding: 8px 4px;">Key</th>
           <th style="padding: 8px 4px;">Value</th>
           <th style="padding: 8px 4px;">Type</th>
-          <th style="padding: 8px 4px; width: 80px;">Action</th>
+          <th style="padding: 8px 4px;">Description</th>
+          <th style="padding: 8px 4px; width: 60px;">Action</th>
         </tr>
       </thead>
       <tbody>`;
@@ -2048,11 +2210,12 @@ HTML = r"""
       const inputType = (c.type === 'int' || c.type === 'float') ? 'number' : 'text';
       const step = c.type === 'float' ? 'step="0.01"' : '';
       html += `<tr style="border-bottom: 1px solid var(--border);">
-        <td style="padding: 6px 4px; font-family: var(--mono); font-size: 11px;" title="${c.description || ''}">${c.key}</td>
+        <td style="padding: 6px 4px; font-family: var(--mono); font-size: 11px;">${c.key}</td>
         <td style="padding: 6px 4px;">
           <input type="${inputType}" ${step} id="cfg_${c.key}" value="${escapeHtml(c.value)}" style="width: 100%; font-size: 11px;" />
         </td>
         <td style="padding: 6px 4px; color: var(--muted);">${c.type}</td>
+        <td style="padding: 6px 4px; font-size: 10px; color: var(--muted);">${escapeHtml(c.description || '-')}</td>
         <td style="padding: 6px 4px;">
           <button class="btn btn-sm btn-secondary" onclick="saveConfig('${c.key}')">Save</button>
         </td>
