@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -14,6 +15,41 @@ from database import get_db
 from util.utils import now_kst_naive, iso
 
 router = APIRouter()
+
+# 닉네임 검증: 한글, 영문, 숫자만 허용 (공백, 이모지, 특수문자 불가)
+VISITOR_NAME_PATTERN = re.compile(r'^[가-힣a-zA-Z0-9]+$')
+VISITOR_NAME_MAX_LEN = 12
+
+
+def _validate_visitor_name(name: str | None) -> str:
+    """
+    닉네임 검증 및 정규화.
+    - 빈 값이면 '관람객' 반환
+    - 한글/영문/숫자만 허용
+    - 최대 12자
+    """
+    if not name:
+        return "관람객"
+
+    name = name.strip()
+    if not name:
+        return "관람객"
+
+    # 길이 체크
+    if len(name) > VISITOR_NAME_MAX_LEN:
+        raise HTTPException(
+            status_code=400,
+            detail=f"닉네임은 {VISITOR_NAME_MAX_LEN}자 이하여야 합니다"
+        )
+
+    # 패턴 체크 (한글/영문/숫자만)
+    if not VISITOR_NAME_PATTERN.match(name):
+        raise HTTPException(
+            status_code=400,
+            detail="닉네임은 한글, 영문, 숫자만 사용할 수 있습니다 (공백/특수문자/이모지 불가)"
+        )
+
+    return name
 
 
 def _read_session_row(db: Session, sid: int):
@@ -31,7 +67,7 @@ def _read_session_row(db: Session, sid: int):
 
 def _start_session_core(db: Session, visitor_name: str | None):
     """세션 시작 핵심 로직"""
-    name = (visitor_name or "").strip() or "관람객"
+    name = _validate_visitor_name(visitor_name)
 
     try:
         started_at = now_kst_naive()  # KST +9

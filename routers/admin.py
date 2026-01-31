@@ -10,7 +10,7 @@ from sqlalchemy import text
 
 from database import get_db
 from util.utils import iso, now_kst_naive, get_config, log_event, clear_config_cache, clear_prompt_cache
-from util.constants import MAX_QUESTIONS
+from util.constants import MAX_QUESTIONS, ALLOWED_VALUE_KEYS
 from routers.persona import _generate_persona
 from routers._store import LOCK, GLOBAL_STATE
 from routers.talk_policy import clear_cache as clear_policy_cache
@@ -133,6 +133,19 @@ def _map_axis_key(axis_ko: str) -> Optional[str]:
     return None
 
 
+def _normalize_value_key(value_key: str) -> Optional[str]:
+    """
+    value_key 정규화: 하이픈을 언더스코어로 변환하고 ALLOWED_VALUE_KEYS에 있는지 검증.
+    예: 'self-direction' -> 'self_direction'
+    """
+    if not value_key:
+        return None
+    normalized = value_key.strip().replace("-", "_").lower()
+    if normalized in ALLOWED_VALUE_KEYS:
+        return normalized
+    return None
+
+
 def ensure_psano_personality_row(db: Session):
     row = db.execute(text("SELECT id FROM psano_personality WHERE id=1")).mappings().first()
     if row:
@@ -200,8 +213,10 @@ async def admin_questions_import(
             axis_key = _map_axis_key(axis_ko)
             choice_a = _cell_str(ws, Q_COL_CHOICE_A, r)
             choice_b = _cell_str(ws, Q_COL_CHOICE_B, r)
-            value_a_key = _cell_str(ws, Q_COL_VALUE_A, r)
-            value_b_key = _cell_str(ws, Q_COL_VALUE_B, r)
+            value_a_raw = _cell_str(ws, Q_COL_VALUE_A, r)
+            value_b_raw = _cell_str(ws, Q_COL_VALUE_B, r)
+            value_a_key = _normalize_value_key(value_a_raw)
+            value_b_key = _normalize_value_key(value_b_raw)
             enabled_raw = _cell_str(ws, Q_COL_ENABLED, r)
             enabled = _parse_enabled(enabled_raw)
 
@@ -228,6 +243,19 @@ async def admin_questions_import(
                 result.failed += 1
                 result.errors.append(ImportErrorItem(
                     row=r, message=f"Invalid enabled (K column). Got '{enabled_raw}', expected Y/N"
+                ))
+                continue
+            # value_key 검증 (빈 값은 허용, 잘못된 값은 에러)
+            if value_a_raw and not value_a_key:
+                result.failed += 1
+                result.errors.append(ImportErrorItem(
+                    row=r, message=f"Invalid value_a_key (D column). Got '{value_a_raw}', expected one of: {list(ALLOWED_VALUE_KEYS)}"
+                ))
+                continue
+            if value_b_raw and not value_b_key:
+                result.failed += 1
+                result.errors.append(ImportErrorItem(
+                    row=r, message=f"Invalid value_b_key (E column). Got '{value_b_raw}', expected one of: {list(ALLOWED_VALUE_KEYS)}"
                 ))
                 continue
 

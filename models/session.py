@@ -1,9 +1,8 @@
-from datetime import datetime
-
 from sqlalchemy import Column, Integer, String, DateTime, Text
 from sqlalchemy.orm import relationship
 
 from database import Base
+from util.utils import now_kst_naive
 
 class Session(Base):
     __tablename__ = "sessions"
@@ -11,7 +10,7 @@ class Session(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     visitor_name = Column(String(100), nullable=False)
 
-    started_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    started_at = Column(DateTime, default=now_kst_naive, nullable=False)
     ended_at = Column(DateTime, nullable=True)
 
     end_reason = Column(String(50), nullable=True)

@@ -53,6 +53,7 @@ def _reaction_text_gpt(
     chosen_value_key: str,
     session_question_index: int,
     answered_total: int,
+    next_question_text: str = "",
 ) -> str:
     """유저 답변에 GPT가 성장단계 스타일로 짧게 반응"""
     # 설정 로드
@@ -82,6 +83,8 @@ def _reaction_text_gpt(
             style_guide=style_guide,
             notes_line=notes_line,
             question_text=question_text,
+            current_question_text=question_text,  # 템플릿 호환용 별칭
+            next_question_text=next_question_text,
             choice=choice,
             session_question_index=session_question_index,
             session_question_limit=session_limit,
@@ -128,11 +131,8 @@ def _reaction_text_gpt(
         return result.content
 
 
-@router.post("", response_model=AnswerResponse)
-def post_answer(req: AnswerRequest, db: Session = Depends(get_db)):
-    sid = int(req.session_id)
-    qid = int(req.question_id)
-    choice = req.choice
+def _post_answer_core(db: Session, sid: int, qid: int, choice: str):
+    """답변 처리 핵심 로직 (POST/GET 공용)"""
 
     # 설정 로드
     session_limit = get_config(db, "session_question_limit", DEFAULT_SESSION_QUESTION_LIMIT)
@@ -257,11 +257,12 @@ def post_answer(req: AnswerRequest, db: Session = Depends(get_db)):
     # next_question: 세션 종료 전이면 다음 질문 번호
     # (참고: psano_state.current_question은 session_service.py에서 세션 종료 시 일괄 업데이트)
     next_question = None
+    next_question_text = ""
     if not session_should_end:
-        # 다음 enabled 질문 찾기
+        # 다음 enabled 질문 찾기 (텍스트 포함)
         next_q = db.execute(
             text("""
-                SELECT id
+                SELECT id, question_text
                 FROM questions
                 WHERE id > :qid AND enabled = 1
                 ORDER BY id ASC
@@ -271,6 +272,7 @@ def post_answer(req: AnswerRequest, db: Session = Depends(get_db)):
         ).mappings().first()
         if next_q:
             next_question = int(next_q["id"])
+            next_question_text = next_q.get("question_text") or ""
 
     # GPT 반응 생성 (성장단계 스타일 반영)
     question_text = q.get("question_text") or ""
@@ -281,6 +283,7 @@ def post_answer(req: AnswerRequest, db: Session = Depends(get_db)):
         chosen_value_key,
         session_question_index,
         answered_total,
+        next_question_text=next_question_text,
     )
 
     # DB에 사노 반응 저장 (실패해도 응답은 반환)
@@ -305,3 +308,25 @@ def post_answer(req: AnswerRequest, db: Session = Depends(get_db)):
         "assistant_reaction_text": reaction_text,
         "next_question": next_question,
     }
+
+
+@router.post("", response_model=AnswerResponse)
+def post_answer(req: AnswerRequest, db: Session = Depends(get_db)):
+    """POST /answer - 형성기 답변 제출"""
+    return _post_answer_core(db, int(req.session_id), int(req.question_id), req.choice)
+
+
+@router.get("", response_model=AnswerResponse)
+def get_answer(
+    session_id: int,
+    question_id: int,
+    choice: str,
+    db: Session = Depends(get_db)
+):
+    """GET /answer - TD용 형성기 답변 제출"""
+    # choice 검증
+    choice = choice.upper()
+    if choice not in ("A", "B"):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="choice must be 'A' or 'B'")
+    return _post_answer_core(db, session_id, question_id, choice)

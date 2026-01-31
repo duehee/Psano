@@ -113,10 +113,15 @@ def build_idle_monologue_prompt(*, persona: str | None, values_summary, stage, a
     return "\n".join(base).strip()
 
 
-@router.post("", response_model=MonologueResponse)
-def idle_monologue(req: MonologueRequest, db: Session = Depends(get_db)):
-    if req.answered_total_override is not None:
-        answered_total = int(req.answered_total_override)
+def _idle_monologue_core(
+    db: Session,
+    model: str = "gpt-4o",
+    max_output_tokens: int | None = None,
+    answered_total_override: int | None = None
+):
+    """혼잣말 생성 핵심 로직 (POST/GET 공용)"""
+    if answered_total_override is not None:
+        answered_total = int(answered_total_override)
     else:
         answered_total = _answered_total(db)
 
@@ -158,8 +163,8 @@ def idle_monologue(req: MonologueRequest, db: Session = Depends(get_db)):
     result = call_llm(
         prompt,
         db=db,
-        model=req.model,
-        max_tokens=req.max_output_tokens or 800,  # GPT-5 reasoning 모델 대응
+        model=model,
+        max_tokens=max_output_tokens or 800,  # GPT-5 reasoning 모델 대응
         fallback_text=fallback_text,
     )
 
@@ -181,6 +186,33 @@ def idle_monologue(req: MonologueRequest, db: Session = Depends(get_db)):
         "stage_name_kr": stage.get("stage_name_kr") or "태동기",
         "stage_name_en": stage.get("stage_name_en") or "Nascent",
     }
+
+
+@router.post("", response_model=MonologueResponse)
+def idle_monologue(req: MonologueRequest, db: Session = Depends(get_db)):
+    """POST /monologue - 혼잣말 생성"""
+    return _idle_monologue_core(
+        db,
+        model=req.model,
+        max_output_tokens=req.max_output_tokens,
+        answered_total_override=req.answered_total_override,
+    )
+
+
+@router.get("", response_model=MonologueResponse)
+def idle_monologue_get(
+    model: str = "gpt-4o",
+    max_output_tokens: int | None = None,
+    answered_total_override: int | None = None,
+    db: Session = Depends(get_db)
+):
+    """GET /monologue - TD용 혼잣말 생성"""
+    return _idle_monologue_core(
+        db,
+        model=model,
+        max_output_tokens=max_output_tokens,
+        answered_total_override=answered_total_override,
+    )
 
 
 # -----------------------
@@ -270,14 +302,14 @@ def build_nudge_prompt(*, persona: str | None, values_summary, idle_ctx: str, re
     return "\n".join(base).strip()
 
 
-@router.post("/nudge", response_model=NudgeResponse)
-def talk_nudge(req: NudgeRequest, db: Session = Depends(get_db)):
-    """
-    POST /monologue/nudge
-    대화 중 사용자 반응이 없을 때 사노가 툭 던지는 한마디
-    """
-    sid = int(req.session_id)
-
+def _talk_nudge_core(
+    db: Session,
+    sid: int,
+    model: str = "gpt-4o",
+    max_output_tokens: int | None = None,
+    recent_messages: int | None = None
+):
+    """nudge 핵심 로직 (POST/GET 공용)"""
     # 1) psano_state (persona/summary)
     st = db.execute(
         text("""
@@ -322,7 +354,7 @@ def talk_nudge(req: NudgeRequest, db: Session = Depends(get_db)):
     idle_ctx = f"[idle_monologue]\n- axis: {axis_key}\n- text: {monologue}\n"
 
     # 4) 최근 대화 조회
-    recent_msgs = _get_recent_messages(db, sid, req.recent_messages or 6)
+    recent_msgs = _get_recent_messages(db, sid, recent_messages or 6)
 
     # 5) 프롬프트 생성
     prompt = build_nudge_prompt(
@@ -346,8 +378,8 @@ def talk_nudge(req: NudgeRequest, db: Session = Depends(get_db)):
         result = call_llm(
             prompt,
             db=db,
-            model=req.model,
-            max_tokens=req.max_output_tokens or 800,
+            model=model,
+            max_tokens=max_output_tokens or 800,
             fallback_text=fallback_text,
         )
 
@@ -383,3 +415,33 @@ def talk_nudge(req: NudgeRequest, db: Session = Depends(get_db)):
         "session_id": sid,
         "idle_id": idle_id,
     }
+
+
+@router.post("/nudge", response_model=NudgeResponse)
+def talk_nudge(req: NudgeRequest, db: Session = Depends(get_db)):
+    """POST /monologue/nudge - 대화 중 사용자 반응이 없을 때 사노가 툭 던지는 한마디"""
+    return _talk_nudge_core(
+        db,
+        sid=int(req.session_id),
+        model=req.model,
+        max_output_tokens=req.max_output_tokens,
+        recent_messages=req.recent_messages,
+    )
+
+
+@router.get("/nudge", response_model=NudgeResponse)
+def talk_nudge_get(
+    session_id: int,
+    model: str = "gpt-4o",
+    max_output_tokens: int | None = None,
+    recent_messages: int | None = None,
+    db: Session = Depends(get_db)
+):
+    """GET /monologue/nudge - TD용 대화 중 nudge"""
+    return _talk_nudge_core(
+        db,
+        sid=session_id,
+        model=model,
+        max_output_tokens=max_output_tokens,
+        recent_messages=recent_messages,
+    )

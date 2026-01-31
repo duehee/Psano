@@ -1,9 +1,8 @@
-from datetime import datetime
-
 from sqlalchemy import Column, Integer, ForeignKey, DateTime, Enum, String
 from sqlalchemy.orm import relationship
 
 from database import Base
+from util.utils import now_kst_naive
 
 class Answer(Base):
     __tablename__ = "answers"
@@ -15,7 +14,7 @@ class Answer(Base):
     choice = Column(Enum("A", "B", name="answer_choice"), nullable=False)
     chosen_value_key = Column(String(64), nullable=True)
 
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=now_kst_naive, nullable=False)
 
     # 관계
     session = relationship("Session", back_populates="answers")

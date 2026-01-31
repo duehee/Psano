@@ -207,6 +207,8 @@ def _load_all_configs(db: Session) -> Dict[str, Any]:
     result = {}
     for row in rows:
         key = row.get("config_key")
+        if not key:  # null key 방지
+            continue
         value = row.get("config_value", "")
         value_type = row.get("value_type", "str")
 
@@ -263,7 +265,11 @@ def _load_all_prompts(db: Session) -> Dict[str, str]:
     except Exception:
         return {}
 
-    result = {row.get("prompt_key"): row.get("prompt_template", "") for row in rows}
+    result = {
+        row.get("prompt_key"): row.get("prompt_template", "")
+        for row in rows
+        if row.get("prompt_key")  # null key 방지
+    }
 
     _prompt_cache = result
     _prompt_cache_time = time.time()
