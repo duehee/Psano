@@ -402,6 +402,13 @@ def talk_start(req: TalkStartRequest, db: Session = Depends(get_db)):
     }
 
 
+@router.get("/start", response_model=TalkStartResponse)
+def talk_start_get(session_id: int, idle_id: int, db: Session = Depends(get_db)):
+    """TD용 GET 엔드포인트 - Query 파라미터로 대화 시작"""
+    req = TalkStartRequest(session_id=session_id, idle_id=idle_id)
+    return talk_start(req, db)
+
+
 @router.post("/turn", response_model=TalkTurnResponse)
 def talk_turn(req: TalkTurnRequest, db: Session = Depends(get_db)):
     """
@@ -609,6 +616,13 @@ def talk_turn(req: TalkTurnRequest, db: Session = Depends(get_db)):
     }
 
 
+@router.get("/turn", response_model=TalkTurnResponse)
+def talk_turn_get(session_id: int, user_text: str, db: Session = Depends(get_db)):
+    """TD용 GET 엔드포인트 - Query 파라미터로 대화 턴"""
+    req = TalkTurnRequest(session_id=session_id, user_text=user_text)
+    return talk_turn(req, db)
+
+
 @router.post("/end", response_model=TalkEndResponse)
 def talk_end(req: TalkEndRequest, db: Session = Depends(get_db)):
     """
@@ -617,3 +631,9 @@ def talk_end(req: TalkEndRequest, db: Session = Depends(get_db)):
     """
     sid = int(req.session_id)
     return end_session_core(db, sid, "talk_end")
+
+
+@router.get("/end", response_model=TalkEndResponse)
+def talk_end_get(session_id: int, db: Session = Depends(get_db)):
+    """TD용 GET 엔드포인트 - Query 파라미터로 대화 종료"""
+    return end_session_core(db, session_id, "talk_end")

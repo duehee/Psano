@@ -29,9 +29,9 @@ def _read_session_row(db: Session, sid: int):
     ).mappings().first()
 
 
-@router.post("/start", response_model=SessionStartResponse)
-def start_session(req: SessionStartRequest, db: Session = Depends(get_db)):
-    name = (req.visitor_name or "").strip() or "관람객"
+def _start_session_core(db: Session, visitor_name: str | None):
+    """세션 시작 핵심 로직"""
+    name = (visitor_name or "").strip() or "관람객"
 
     try:
         started_at = now_kst_naive()  # KST +9
@@ -43,7 +43,6 @@ def start_session(req: SessionStartRequest, db: Session = Depends(get_db)):
         start_question_id = int(st["current_question"]) if st else 1
 
         # teach/talk 여부와 상관없이 "세션 기본 정보만" 생성
-        # start_question_id: 타임아웃 시 롤백용
         result = db.execute(
             text("""
                 INSERT INTO sessions (visitor_name, started_at, start_question_id)
@@ -66,11 +65,10 @@ def start_session(req: SessionStartRequest, db: Session = Depends(get_db)):
         SESSIONS[sid] = {
             "id": sid,
             "visitor_name": name,
-            "started_at": started_at,   # datetime
+            "started_at": started_at,
             "ended_at": None,
             "end_reason": None,
-            "start_question_id": start_question_id,  # 타임아웃 롤백용
-            # talk 전용은 "아직 시작 안 함" 상태로 둠
+            "start_question_id": start_question_id,
             "idle_id": None,
             "idle_talk_memory": None,
             "idle_turn_count": 0,
@@ -87,11 +85,28 @@ def start_session(req: SessionStartRequest, db: Session = Depends(get_db)):
     }
 
 
+@router.post("/start", response_model=SessionStartResponse)
+def start_session(req: SessionStartRequest, db: Session = Depends(get_db)):
+    return _start_session_core(db, req.visitor_name)
+
+
+@router.get("/start", response_model=SessionStartResponse)
+def start_session_get(visitor_name: str | None = None, db: Session = Depends(get_db)):
+    """TD용 GET 엔드포인트 - Query 파라미터로 세션 시작"""
+    return _start_session_core(db, visitor_name)
+
+
 @router.post("/end", response_model=SessionEndResponse)
 def end_session(req: SessionEndRequest, db: Session = Depends(get_db)):
     sid = int(req.session_id)
     reason = (req.reason or "completed")
     return end_session_core(db, sid, reason)
+
+
+@router.get("/end", response_model=SessionEndResponse)
+def end_session_get(session_id: int, reason: str = "completed", db: Session = Depends(get_db)):
+    """TD용 GET 엔드포인트 - Query 파라미터로 세션 종료"""
+    return end_session_core(db, session_id, reason)
 
 @router.get("/{session_id}")
 def get_session(session_id: int, db: Session = Depends(get_db)):
