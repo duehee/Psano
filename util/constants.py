@@ -35,3 +35,12 @@ VALUE_KEYS_ORDERED = (
 
 # set 버전 (빠른 검색용)
 ALLOWED_VALUE_KEYS = frozenset(VALUE_KEYS_ORDERED)
+
+# 대화 관련 제한 (Talk/Monologue)
+TALK_INPUT_LIMIT = 200       # 사용자 입력 최대 길이
+TALK_OUTPUT_LIMIT = 150      # 사노 응답 최대 길이
+TALK_MEMORY_LIMIT = 600      # 세션 메모리 최대 길이
+TALK_RECENT_TURNS = 3        # 최근 대화 턴 수
+
+# 닉네임 제한
+VISITOR_NAME_MAX_LEN = 12

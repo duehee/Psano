@@ -13,12 +13,12 @@ from schemas.session import (
 from routers._store import LOCK, GLOBAL_STATE, SESSIONS
 from database import get_db
 from util.utils import now_kst_naive, iso
+from util.constants import VISITOR_NAME_MAX_LEN
 
 router = APIRouter()
 
 # 닉네임 검증: 한글, 영문, 숫자만 허용 (공백, 이모지, 특수문자 불가)
 VISITOR_NAME_PATTERN = re.compile(r'^[가-힣a-zA-Z0-9]+$')
-VISITOR_NAME_MAX_LEN = 12
 
 
 def _validate_visitor_name(name: str | None) -> str:

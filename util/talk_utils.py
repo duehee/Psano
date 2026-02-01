@@ -10,9 +10,10 @@ from sqlalchemy.orm import Session
 
 from routers.talk_policy import moderate_text
 from util.utils import get_prompt
+from util.constants import TALK_OUTPUT_LIMIT
 
-
-OUTPUT_LIMIT = 150
+# constants에서 import (하위 호환성을 위한 별칭)
+OUTPUT_LIMIT = TALK_OUTPUT_LIMIT
 
 # 정책 가이드 기본 템플릿 (DB에 없을 때 fallback)
 _DEFAULT_POLICY_GUIDE = """[정책 안내]

@@ -15,10 +15,9 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from util.utils import get_config
+from util.constants import MAX_QUESTIONS
 
 router = APIRouter()
-
-MAX_QUESTIONS = 365
 
 
 # =========================

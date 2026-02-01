@@ -4,7 +4,10 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 from services.session_service import end_session_core
 from util.utils import trim, summary_to_text, get_prompt, get_config
-from util.constants import DEFAULT_GLOBAL_TURN_MAX, DEFAULT_GLOBAL_WARNING_START
+from util.constants import (
+    DEFAULT_GLOBAL_TURN_MAX, DEFAULT_GLOBAL_WARNING_START,
+    TALK_INPUT_LIMIT, TALK_MEMORY_LIMIT, TALK_RECENT_TURNS
+)
 import random
 import json
 import re
@@ -24,9 +27,10 @@ from services.llm_service import call_llm
 from util.talk_utils import get_policy_guide, OUTPUT_LIMIT
 from routers._store import LOCK, SESSIONS
 
-INPUT_LIMIT = 200
-MEMORY_LIMIT = 600
-RECENT_TURNS = 3
+# constants에서 import한 값 사용 (하위 호환성을 위한 별칭)
+INPUT_LIMIT = TALK_INPUT_LIMIT
+MEMORY_LIMIT = TALK_MEMORY_LIMIT
+RECENT_TURNS = TALK_RECENT_TURNS
 
 router = APIRouter()
 
