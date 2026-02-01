@@ -239,7 +239,8 @@ def _post_answer_core(db: Session, sid: int, qid: int, choice: str):
         db.commit()
 
         # 7) 365 도달 시 자동 페르소나 생성 (형성기 완료)
-        if answered_total == MAX_QUESTIONS:
+        #    >= 조건: 세션 미종료 상태에서 트리거 실패 시 다음 답변에서 재시도
+        if answered_total >= MAX_QUESTIONS:
             try:
                 from routers.persona import _generate_persona
                 _generate_persona(db, force=False, model=None, allow_under_365=False)
