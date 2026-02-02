@@ -11,16 +11,22 @@ from schemas.monologue import (
 )
 
 from services.llm_service import call_llm
-from util.utils import trim, summary_to_text, load_growth_stage
+from util.utils import trim, summary_to_text, load_growth_stage, get_config
 from util.talk_utils import apply_policy_guard, OUTPUT_LIMIT
 
 router = APIRouter()
 
-FALLBACK_LINES = [
+# 하드코딩 fallback (DB에 없을 때 기본값)
+_DEFAULT_FALLBACK_LINES = [
     "잠깐, 생각이 물에 잠겼어.",
     "말이 오기 전에 숨이 먼저 지나가.",
     "지금은 한 문장만 남겨둘게.",
 ]
+
+
+def _get_fallback_lines(db: Session) -> list:
+    """DB에서 fallback 메시지 로드 (없으면 기본값)"""
+    return get_config(db, "monologue_fallback_lines", _DEFAULT_FALLBACK_LINES)
 
 
 def _apply_policy_guard(db: Session, text_for_check: str, user_text: str = ""):
@@ -159,7 +165,8 @@ def _idle_monologue_core(
         }
 
     # LLM 호출 (설정: psano_config에서 로드)
-    fallback_text = FALLBACK_LINES[int(time.time()) % len(FALLBACK_LINES)]
+    fallback_lines = _get_fallback_lines(db)
+    fallback_text = fallback_lines[int(time.time()) % len(fallback_lines)]
     result = call_llm(
         prompt,
         db=db,
@@ -374,7 +381,8 @@ def _talk_nudge_core(
         status = Status.fallback
     else:
         # LLM 호출
-        fallback_text = FALLBACK_LINES[int(time.time()) % len(FALLBACK_LINES)]
+        fallback_lines = _get_fallback_lines(db)
+        fallback_text = fallback_lines[int(time.time()) % len(fallback_lines)]
         result = call_llm(
             prompt,
             db=db,

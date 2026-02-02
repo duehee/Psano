@@ -1637,10 +1637,10 @@ def admin_quick_test(
 
             current_qid = qid + 1
 
-        # 4) psano_personality 업데이트
+        # 4) psano_personality 업데이트 (SQL Injection 방지: whitelist 검증)
         for ans in answers_submitted:
             col = ans["chosen_value_key"]
-            if col:
+            if col and col in ALLOWED_VALUE_KEYS:
                 db.execute(
                     text(f"UPDATE psano_personality SET `{col}` = `{col}` + 1 WHERE id = 1"),
                 )

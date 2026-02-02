@@ -1,9 +1,12 @@
 import time
+import logging
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 from database import get_db
+
+logger = logging.getLogger("psano")
 from schemas.answer import AnswerRequest, AnswerResponse
 from services.llm_service import call_llm
 from util.utils import load_growth_stage, get_config, get_prompt
@@ -125,10 +128,7 @@ def _reaction_text_gpt(
         fallback_text=fallback_text,
     )
 
-    if result.success:
-        return result.content[:60]
-    else:
-        return result.content
+    return result.content
 
 
 def _post_answer_core(db: Session, sid: int, qid: int, choice: str):
@@ -244,9 +244,9 @@ def _post_answer_core(db: Session, sid: int, qid: int, choice: str):
             try:
                 from routers.persona import _generate_persona
                 _generate_persona(db, force=False, model=None, allow_under_365=False)
-            except Exception:
+            except Exception as e:
                 # 실패해도 답변 응답은 정상 반환 (다음 답변 시 재시도됨)
-                pass
+                logger.warning(f"Auto persona generation failed (will retry on next answer): {e}")
 
     except HTTPException:
         db.rollback()
@@ -274,6 +274,9 @@ def _post_answer_core(db: Session, sid: int, qid: int, choice: str):
         if next_q:
             next_question = int(next_q["id"])
             next_question_text = next_q.get("question_text") or ""
+        else:
+            # 다음 질문 없음 (365 도달) → 세션 종료 처리
+            session_should_end = True
 
     # GPT 반응 생성 (성장단계 스타일 반영)
     question_text = q.get("question_text") or ""
@@ -298,7 +301,8 @@ def _post_answer_core(db: Session, sid: int, qid: int, choice: str):
             {"reaction": reaction_text, "sid": sid, "qid": qid}
         )
         db.commit()
-    except Exception:
+    except Exception as e:
+        logger.warning(f"Failed to save assistant_reaction for session={sid}, question={qid}: {e}")
         db.rollback()
 
     return {

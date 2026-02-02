@@ -14,7 +14,18 @@ db = os.getenv("DB_NAME")
 
 DB_URL = f"mysql+pymysql://{user}:{passwd}@{host}:{port}/{db}?charset=utf8mb4"
 
-engine = create_engine(DB_URL, echo=False, pool_pre_ping=True)
+engine = create_engine(
+    DB_URL,
+    echo=False,
+    pool_pre_ping=True,
+    pool_recycle=3600,  # 1시간 후 연결 재사용 (stale connection 방지)
+    pool_timeout=10,    # 풀에서 연결 대기 최대 시간
+    connect_args={
+        "connect_timeout": 10,  # DB 연결 타임아웃 (초)
+        "read_timeout": 30,     # 읽기 타임아웃 (초)
+        "write_timeout": 30,    # 쓰기 타임아웃 (초)
+    }
+)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 

@@ -798,7 +798,8 @@ HTML = r"""
         <div class="form-label">Current State</div>
         <div style="display: flex; flex-direction: column; gap: 6px; font-size: 12px; font-family: var(--mono);">
           <div>Phase: <strong id="statePhase">-</strong></div>
-          <div>Question: <strong id="stateQuestion">-</strong></div>
+          <div>답변: <strong id="stateAnswered">-</strong> / 365</div>
+          <div>다음 시작: <strong>Q<span id="stateQuestion">-</span></strong></div>
           <div>Cycle: <strong id="stateCycle">-</strong></div>
         </div>
       </div>
@@ -1420,6 +1421,7 @@ HTML = r"""
     try {
       const data = await fetchJson('/state');
       document.getElementById('statePhase').textContent = data.phase || '-';
+      document.getElementById('stateAnswered').textContent = data.answered_total ?? '-';
       document.getElementById('stateQuestion').textContent = data.current_question || '-';
       document.getElementById('stateCycle').textContent = data.cycle_number || '1';
       log({ endpoint: '/state', data });

@@ -13,11 +13,17 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 from database import get_db
+from util.utils import get_config
 
 router = APIRouter()
 
 # 하드코딩 fallback (DB에 데이터 없을 때)
 _DEFAULT_GREETING = "어… 누구야…?\n나는 사노라고 해.\n내가 무엇인지, 어떤 존재인지도 잘 모르겠어.\n그래서… 조금 물어봐도 될까?"
+
+
+def _get_default_greeting(db: Session) -> str:
+    """DB에서 기본 인사말 로드 (없으면 기본값)"""
+    return get_config(db, "idle_default_greeting", _DEFAULT_GREETING)
 
 # 5개 가치축 내 대립쌍 (각 쌍에서 높은 쪽 선택)
 AXIS_PAIRS = [
@@ -91,11 +97,11 @@ def get_idle_greeting(db: Session = Depends(get_db)):
             "stage_id": 1,
             "stage_name_kr": "탄생",
             "stage_name_en": "birth",
-            "greeting": _DEFAULT_GREETING,
+            "greeting": _get_default_greeting(db),
             "answered_total": answered_total,
         }
 
-    greeting = row.get("idle_greeting") or _DEFAULT_GREETING
+    greeting = row.get("idle_greeting") or _get_default_greeting(db)
 
     return {
         "ok": True,

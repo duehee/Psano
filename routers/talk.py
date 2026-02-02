@@ -34,11 +34,17 @@ RECENT_TURNS = TALK_RECENT_TURNS
 
 router = APIRouter()
 
-FALLBACK_LINES = [
+# 하드코딩 fallback (DB에 없을 때 기본값)
+_DEFAULT_FALLBACK_LINES = [
     "지금은 말이 잘 나오지 않아. 조금 더 조용히 생각해볼게.",
     "나는 아직 정리 중이야. 너의 질문이 물결처럼 남아 있어.",
     "답을 급히 만들고 싶진 않아. 한 번만 더 천천히 말해줄래?",
 ]
+
+
+def _get_fallback_lines(db: Session) -> list:
+    """DB에서 fallback 메시지 로드 (없으면 기본값)"""
+    return get_config(db, "talk_fallback_lines", _DEFAULT_FALLBACK_LINES)
 
 
 def _safe_format(template: str, **kwargs) -> str:
@@ -376,7 +382,8 @@ def talk_start(req: TalkStartRequest, db: Session = Depends(get_db)):
     )
 
     # 5) LLM 호출
-    fallback_text = FALLBACK_LINES[int(time.time()) % len(FALLBACK_LINES)]
+    fallback_lines = _get_fallback_lines(db)
+    fallback_text = fallback_lines[int(time.time()) % len(fallback_lines)]
     result = call_llm(
         prompt,
         db=db,
@@ -550,7 +557,8 @@ def talk_turn(req: TalkTurnRequest, db: Session = Depends(get_db)):
     )
 
     # 8) LLM 호출
-    fallback_text = FALLBACK_LINES[int(time.time()) % len(FALLBACK_LINES)]
+    fallback_lines = _get_fallback_lines(db)
+    fallback_text = fallback_lines[int(time.time()) % len(fallback_lines)]
     result = call_llm(
         prompt,
         db=db,
