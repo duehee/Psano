@@ -861,81 +861,11 @@ def admin_cycle_reset(db: Session = Depends(get_db)):
     - personality 초기화 (모든 값 0)
     - answers, sessions는 유지 (과거 데이터 보존)
     """
-    try:
-        ensure_psano_state_row(db)
-
-        # 1) 현재 cycle_number 조회
-        row = db.execute(
-            text("SELECT cycle_number FROM psano_state WHERE id = 1")
-        ).mappings().first()
-        current_cycle = int(row.get("cycle_number") or 1) if row else 1
-        new_cycle = current_cycle + 1
-
-        # 2) psano_state 업데이트 (새 사이클 시작)
-        try:
-            db.execute(text("""
-                UPDATE psano_state
-                SET phase = 'teach',
-                    current_question = 1,
-                    formed_at = NULL,
-                    persona_prompt = NULL,
-                    values_summary = NULL,
-                    global_turn_count = 0,
-                    cycle_number = :new_cycle
-                WHERE id = 1
-            """), {"new_cycle": new_cycle})
-        except Exception:
-            # values_summary 컬럼이 없는 경우
-            db.execute(text("""
-                UPDATE psano_state
-                SET phase = 'teach',
-                    current_question = 1,
-                    global_turn_count = 0,
-                    cycle_number = :new_cycle
-                WHERE id = 1
-            """), {"new_cycle": new_cycle})
-
-        # 3) psano_personality 초기화 (새 페르소나 구축 준비)
-        db.execute(text("""
-            UPDATE psano_personality
-            SET self_direction = 0, conformity = 0, stimulation = 0, security = 0,
-                hedonism = 0, tradition = 0, achievement = 0, benevolence = 0,
-                power = 0, universalism = 0
-            WHERE id = 1
-        """))
-
-        # 4) 활성 세션 모두 종료 (이전 사이클 세션이 current_question 오염 방지)
-        db.execute(text("""
-            UPDATE sessions
-            SET ended_at = :now, end_reason = 'cycle_reset'
-            WHERE ended_at IS NULL
-        """), {"now": now_kst_naive()})
-
-        # 5) 메모리 캐시 동기화
-        with LOCK:
-            GLOBAL_STATE["phase"] = "teach"
-            GLOBAL_STATE["current_question"] = 1
-            GLOBAL_STATE["formed_at"] = None
-            GLOBAL_STATE["persona_prompt"] = None
-            GLOBAL_STATE["values_summary"] = None
-            GLOBAL_STATE["global_turn_count"] = 0
-            GLOBAL_STATE["cycle_number"] = new_cycle
-
-        db.commit()
-
-        # 이벤트 로깅
-        log_event("cycle_reset", new_cycle=new_cycle, previous_cycle=current_cycle)
-
-        return {
-            "ok": True,
-            "previous_cycle": current_cycle,
-            "new_cycle": new_cycle,
-            "message": f"사이클 {new_cycle} 시작 (이전 데이터 보존)"
-        }
-
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"cycle reset error: {e}")
+    from services.session_service import reset_cycle_core
+    ensure_psano_state_row(db)
+    result = reset_cycle_core(db, reason="admin_reset")
+    result["message"] = f"사이클 {result['new_cycle']} 시작 (이전 데이터 보존)"
+    return result
 
 
 @router.post("/phase/set", response_model=AdminPhaseSetResponse)

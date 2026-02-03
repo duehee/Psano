@@ -2,7 +2,7 @@ import time
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import text
-from services.session_service import end_session_core
+from services.session_service import end_session_core, reset_cycle_core
 from util.utils import trim, summary_to_text, get_prompt, get_config
 from util.constants import (
     DEFAULT_GLOBAL_TURN_MAX, DEFAULT_GLOBAL_WARNING_START,
@@ -445,10 +445,17 @@ def talk_turn(req: TalkTurnRequest, db: Session = Depends(get_db)):
 
     # 2) 글로벌 엔딩 체크 (365 도달)
     if global_turn_count >= global_turn_max:
-        global_ending_msg = get_config(db, "global_ending_message", "여기까지야.")
+        global_ending_msg = get_config(db, "global_ending_message", "고마웠어.")
         # 이벤트 로깅
         from util.utils import log_event
         log_event("global_ending", turn_count=global_turn_count, turn_max=global_turn_max)
+
+        # 사이클 자동 리셋 (새로운 형성기 시작 준비)
+        try:
+            reset_cycle_core(db, reason="global_token_exhausted")
+        except Exception as e:
+            log_event("cycle_reset_error", error=str(e))
+
         return {
             "status": Status.ok,
             "ui_text": global_ending_msg,

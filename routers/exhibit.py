@@ -519,6 +519,55 @@ const END_SCREEN_AUTO_RESTART = 30000; // 완료 화면 30초 후 자동 복귀
 const INACTIVE_AUTO_RESTART = 60000; // 1분 입력 없으면 자동 복귀
 
 // ==================
+// 화면 꺼짐 방지 (Wake Lock)
+// ==================
+
+let wakeLock = null;
+
+async function requestWakeLock() {
+  if ('wakeLock' in navigator) {
+    try {
+      wakeLock = await navigator.wakeLock.request('screen');
+      console.log('Wake Lock 활성화');
+      wakeLock.addEventListener('release', () => {
+        console.log('Wake Lock 해제됨');
+      });
+    } catch (e) {
+      console.log('Wake Lock 실패:', e.message);
+    }
+  }
+}
+
+// 페이지 다시 보일 때 Wake Lock 재요청
+document.addEventListener('visibilitychange', async () => {
+  if (document.visibilityState === 'visible' && !wakeLock) {
+    await requestWakeLock();
+  }
+});
+
+// ==================
+// 풀스크린 모드
+// ==================
+
+function toggleFullscreen() {
+  if (!document.fullscreenElement) {
+    document.documentElement.requestFullscreen().catch(e => {
+      console.log('Fullscreen 실패:', e.message);
+    });
+  } else {
+    document.exitFullscreen();
+  }
+}
+
+// F11로 풀스크린 토글
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'F11') {
+    e.preventDefault();
+    toggleFullscreen();
+  }
+});
+
+// ==================
 // 자동 재시작
 // ==================
 
@@ -589,16 +638,35 @@ function updateProgress() {
 // API
 // ==================
 
+const API_TIMEOUT = 20000; // 20초 (서버 LLM 8초 + 재시도 여유)
+
 async function api(endpoint, options = {}) {
-  const res = await fetch(API_BASE + endpoint, {
-    headers: { 'Content-Type': 'application/json' },
-    ...options
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || '요청 실패');
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT);
+
+  try {
+    const res = await fetch(API_BASE + endpoint, {
+      headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal,
+      ...options
+    });
+    clearTimeout(timeoutId);
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || '요청 실패');
+    }
+    return res.json();
+  } catch (e) {
+    clearTimeout(timeoutId);
+    if (e.name === 'AbortError') {
+      throw new Error('응답 시간이 초과되었습니다');
+    }
+    if (e.message === 'Failed to fetch' || e.message.includes('network')) {
+      throw new Error('네트워크 연결을 확인해주세요');
+    }
+    throw e;
   }
-  return res.json();
 }
 
 // ==================
@@ -881,8 +949,9 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
-// 페이지 로드 시 혼잣말 표시
+// 페이지 로드 시 초기화
 document.addEventListener('DOMContentLoaded', () => {
+  requestWakeLock();
   displayGreeting();
 });
 </script>
