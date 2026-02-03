@@ -238,15 +238,7 @@ def _post_answer_core(db: Session, sid: int, qid: int, choice: str):
 
         db.commit()
 
-        # 7) 365 도달 시 자동 페르소나 생성 (형성기 완료)
-        #    >= 조건: 세션 미종료 상태에서 트리거 실패 시 다음 답변에서 재시도
-        if answered_total >= MAX_QUESTIONS:
-            try:
-                from routers.persona import _generate_persona
-                _generate_persona(db, force=False, model=None, allow_under_365=False)
-            except Exception as e:
-                # 실패해도 답변 응답은 정상 반환 (다음 답변 시 재시도됨)
-                logger.warning(f"Auto persona generation failed (will retry on next answer): {e}")
+        # 페르소나 생성은 클라이언트에서 /persona/generate API 직접 호출
 
     except HTTPException:
         db.rollback()
@@ -312,6 +304,7 @@ def _post_answer_core(db: Session, sid: int, qid: int, choice: str):
         "chosen_value_key": chosen_value_key,
         "assistant_reaction_text": reaction_text,
         "next_question": next_question,
+        "persona_generated": False,  # 클라이언트에서 /persona/generate 직접 호출
     }
 
 

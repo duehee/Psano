@@ -177,8 +177,18 @@ def _generate_persona(db: Session, *, force: bool, model: str | None, allow_unde
     if not st:
         raise HTTPException(status_code=500, detail="psano_state(id=1) not found")
 
-    current_q = int(st.get("current_question") or 1)
-    answered_total = max(0, current_q - 1)
+    # answered_total: answers 테이블에서 직접 COUNT (현재 사이클만)
+    cycle_row = db.execute(
+        text("SELECT cycle_number FROM psano_state WHERE id = 1")
+    ).mappings().first()
+    current_cycle = int(cycle_row["cycle_number"]) if cycle_row else 1
+
+    total_row = db.execute(
+        text("SELECT COUNT(*) AS cnt FROM answers WHERE cycle_id = :cycle_id"),
+        {"cycle_id": current_cycle}
+    ).mappings().first()
+    answered_total = int(total_row["cnt"]) if total_row else 0
+
     if answered_total > total_questions:
         answered_total = total_questions
 

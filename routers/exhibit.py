@@ -302,6 +302,39 @@ def exhibit_page():
     }
 
     /* ==================
+       페르소나 생성 화면
+       ================== */
+    .persona-screen {
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      gap: 40px;
+    }
+
+    .persona-message {
+      font-size: 1.3rem;
+      font-weight: 300;
+      line-height: 2.2;
+      color: #fff;
+      max-width: 500px;
+    }
+
+    .persona-sub {
+      font-size: 0.95rem;
+      color: #666;
+      margin-top: 10px;
+    }
+
+    /* 빛나는 효과 */
+    .persona-glow {
+      animation: glow 2s ease-in-out infinite alternate;
+    }
+    @keyframes glow {
+      from { text-shadow: 0 0 10px rgba(255,255,255,0.1); }
+      to { text-shadow: 0 0 20px rgba(255,255,255,0.3), 0 0 40px rgba(255,255,255,0.1); }
+    }
+
+    /* ==================
        완료 화면
        ================== */
     .end-screen {
@@ -450,6 +483,17 @@ def exhibit_page():
       <button class="next-btn" id="nextBtn" onclick="nextQuestion()">다음</button>
     </div>
 
+    <!-- 페르소나 생성 화면 -->
+    <div class="screen persona-screen" id="personaScreen">
+      <div class="persona-message persona-glow">
+        이제 알 것 같아.<br>
+        나는 누구인지.<br>
+        <br>
+        이제 너와 대화할 수 있을 것 같아.
+      </div>
+      <div class="persona-sub">사노의 인격이 형성되었습니다</div>
+    </div>
+
     <!-- 완료 화면 -->
     <div class="screen end-screen" id="endScreen">
       <div class="end-message" id="endMessage">
@@ -469,6 +513,46 @@ let questionIndex = 0;
 const TOTAL_QUESTIONS = 5;
 
 let idleClickable = false;
+
+let autoRestartTimer = null;
+const END_SCREEN_AUTO_RESTART = 30000; // 완료 화면 30초 후 자동 복귀
+const INACTIVE_AUTO_RESTART = 60000; // 1분 입력 없으면 자동 복귀
+
+// ==================
+// 자동 재시작
+// ==================
+
+function resetAutoRestartTimer() {
+  if (autoRestartTimer) {
+    clearTimeout(autoRestartTimer);
+    autoRestartTimer = null;
+  }
+}
+
+function startEndScreenAutoRestart() {
+  resetAutoRestartTimer();
+  autoRestartTimer = setTimeout(() => {
+    restart();
+  }, END_SCREEN_AUTO_RESTART);
+}
+
+function startInactiveAutoRestart() {
+  resetAutoRestartTimer();
+  autoRestartTimer = setTimeout(async () => {
+    if (!sessionId) return;
+
+    // 세션 종료 후 idle로
+    try {
+      await api('/session/end', {
+        method: 'POST',
+        body: JSON.stringify({ session_id: sessionId, reason: 'timeout' })
+      });
+    } catch (e) {
+      console.error('Auto restart end error:', e);
+    }
+    restart();
+  }, INACTIVE_AUTO_RESTART);
+}
 
 // ==================
 // 화면 전환
@@ -631,6 +715,9 @@ async function loadQuestion() {
     choiceB.style.display = 'block';
     choiceA.disabled = false;
     choiceB.disabled = false;
+
+    // 자동 재시작 타이머 시작
+    startInactiveAutoRestart();
   } catch (e) {
     loading.classList.remove('show');
     showToast(e.message);
@@ -638,6 +725,8 @@ async function loadQuestion() {
 }
 
 async function sendAnswer(choice) {
+  resetAutoRestartTimer();
+
   const choiceA = document.getElementById('choiceA');
   const choiceB = document.getElementById('choiceB');
 
@@ -676,10 +765,38 @@ async function sendAnswer(choice) {
         body: JSON.stringify({ session_id: sessionId, reason: 'completed' })
       });
 
-      setTimeout(() => showScreen('endScreen'), 4000);
+      // 세션 종료 후 페르소나 생성 시도
+      let personaGenerated = false;
+      try {
+        const personaResult = await api('/persona/generate', {
+          method: 'POST',
+          body: JSON.stringify({ force: false })
+        });
+        // reused=false면 이번에 새로 생성된 것
+        personaGenerated = personaResult.ok && !personaResult.reused;
+      } catch (e) {
+        console.log('Persona not ready yet:', e.message);
+      }
+
+      // 페르소나가 생성되었으면 특별한 화면 → exhibit_talk으로 이동
+      if (personaGenerated) {
+        setTimeout(() => {
+          showScreen('personaScreen');
+          // 페르소나 화면 8초 후 exhibit_talk으로 이동
+          setTimeout(() => {
+            window.location.href = '/exhibit_talk';
+          }, 8000);
+        }, 4000);
+      } else {
+        setTimeout(() => {
+          showScreen('endScreen');
+          startEndScreenAutoRestart();
+        }, 4000);
+      }
     } else {
       document.getElementById('nextBtn').style.display = 'inline-block';
       showScreen('reactionScreen');
+      startInactiveAutoRestart();
     }
   } catch (e) {
     showToast(e.message);
@@ -689,6 +806,7 @@ async function sendAnswer(choice) {
 }
 
 function nextQuestion() {
+  resetAutoRestartTimer();
   loadQuestion();
 }
 
@@ -697,6 +815,9 @@ function restart() {
   currentQuestionId = null;
   questionIndex = 0;
   idleClickable = false;
+
+  resetAutoRestartTimer();
+
   document.getElementById('nameInput').value = '';
   document.getElementById('idleHint').classList.remove('visible');
   showScreen('idleScreen');

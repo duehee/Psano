@@ -14,3 +14,4 @@ class AnswerResponse(BaseModel):
     chosen_value_key: Optional[str] = None
     assistant_reaction_text: str
     next_question: Optional[int] = None
+    persona_generated: bool = False  # 365 도달로 페르소나 생성됨

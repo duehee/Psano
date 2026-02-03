@@ -386,6 +386,10 @@ let isProcessing = false;
 let nudgeTimer = null;
 const NUDGE_DELAY = 15000; // 15초
 
+let autoRestartTimer = null;
+const END_SCREEN_AUTO_RESTART = 30000; // 완료 화면 30초 후 자동 복귀
+const IDLE_AUTO_RESTART = 120000; // 대화 중 2분 입력 없으면 자동 복귀
+
 // ==================
 // 화면 전환
 // ==================
@@ -418,6 +422,42 @@ async function api(endpoint, options = {}) {
     throw new Error(err.detail || '요청 실패');
   }
   return res.json();
+}
+
+// ==================
+// 자동 재시작
+// ==================
+
+function resetAutoRestartTimer() {
+  if (autoRestartTimer) {
+    clearTimeout(autoRestartTimer);
+    autoRestartTimer = null;
+  }
+}
+
+function startEndScreenAutoRestart() {
+  resetAutoRestartTimer();
+  autoRestartTimer = setTimeout(() => {
+    restart();
+  }, END_SCREEN_AUTO_RESTART);
+}
+
+function startIdleAutoRestart() {
+  resetAutoRestartTimer();
+  autoRestartTimer = setTimeout(async () => {
+    if (!sessionId) return;
+
+    // 세션 종료 후 idle로
+    try {
+      await api('/talk/end', {
+        method: 'POST',
+        body: JSON.stringify({ session_id: sessionId })
+      });
+    } catch (e) {
+      console.error('Auto restart end error:', e);
+    }
+    restart();
+  }, IDLE_AUTO_RESTART);
 }
 
 // ==================
@@ -625,6 +665,8 @@ async function startTalk() {
 
     // Nudge 타이머 시작
     startNudgeTimer();
+    // 자동 재시작 타이머 시작
+    startIdleAutoRestart();
 
     document.getElementById('chatInput').focus();
 
@@ -643,6 +685,8 @@ async function sendMessage() {
 
   // Nudge 타이머 리셋
   resetNudgeTimer();
+  // 자동 재시작 타이머 리셋
+  resetAutoRestartTimer();
 
   isProcessing = true;
   setInputEnabled(false);
@@ -680,12 +724,15 @@ async function sendMessage() {
 
       setTimeout(() => {
         showScreen('endScreen');
+        startEndScreenAutoRestart();
       }, 2000);
       return;
     }
 
     // Nudge 타이머 재시작
     startNudgeTimer();
+    // 자동 재시작 타이머 재시작
+    startIdleAutoRestart();
 
     setInputEnabled(true);
     input.focus();
@@ -706,6 +753,7 @@ function restart() {
   isProcessing = false;
 
   resetNudgeTimer();
+  resetAutoRestartTimer();
 
   document.getElementById('chatMessages').innerHTML = '';
   document.getElementById('chatInput').value = '';
@@ -735,11 +783,13 @@ document.getElementById('chatInput').addEventListener('keypress', (e) => {
   }
 });
 
-// 타이핑 중이면 nudge 타이머 리셋
+// 타이핑 중이면 nudge/자동재시작 타이머 리셋
 document.getElementById('chatInput').addEventListener('input', () => {
   if (sessionId) {
     resetNudgeTimer();
     startNudgeTimer();
+    resetAutoRestartTimer();
+    startIdleAutoRestart();
   }
 });
 
