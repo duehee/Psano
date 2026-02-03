@@ -443,19 +443,18 @@ def talk_turn(req: TalkTurnRequest, db: Session = Depends(get_db)):
     global_warning_start = get_config(db, "global_warning_start", DEFAULT_GLOBAL_WARNING_START)
     global_turn_count = int(st.get("global_turn_count") or 0)
 
-    # 2) 글로벌 엔딩 체크 (365 도달)
+    # 2) 글로벌 엔딩 체크 (이미 max 도달한 경우 - 리셋 실패 복구용)
     if global_turn_count >= global_turn_max:
-        global_ending_msg = get_config(db, "global_ending_message", "고마웠어.")
-        # 이벤트 로깅
+        # 이전 턴에서 리셋이 실패했을 수 있음 - 다시 시도
         from util.utils import log_event
-        log_event("global_ending", turn_count=global_turn_count, turn_max=global_turn_max)
+        log_event("global_ending_recovery", turn_count=global_turn_count, turn_max=global_turn_max)
 
-        # 사이클 자동 리셋 (새로운 형성기 시작 준비)
         try:
-            reset_cycle_core(db, reason="global_token_exhausted")
+            reset_cycle_core(db, reason="global_token_exhausted_recovery")
         except Exception as e:
             log_event("cycle_reset_error", error=str(e))
 
+        global_ending_msg = get_config(db, "global_ending_message", "고마웠어.")
         return {
             "status": Status.ok,
             "ui_text": global_ending_msg,
@@ -621,6 +620,24 @@ def talk_turn(req: TalkTurnRequest, db: Session = Depends(get_db)):
     )
     db.commit()
 
+    # 글로벌 턴 카운트 증가 후 체크 (이번 턴이 마지막인지)
+    new_global_turn_count = global_turn_count + 1
+    is_global_last_turn = new_global_turn_count >= global_turn_max
+
+    # 마지막 턴이면 사이클 리셋 + 엔딩 메시지 추가
+    if is_global_last_turn:
+        global_ending_msg = get_config(db, "global_ending_message", "고마웠어.")
+        from util.utils import log_event
+        log_event("global_ending", turn_count=new_global_turn_count, turn_max=global_turn_max)
+
+        try:
+            reset_cycle_core(db, reason="global_token_exhausted")
+        except Exception as e:
+            log_event("cycle_reset_error", error=str(e))
+
+        # 응답에 엔딩 메시지 추가
+        assistant_text = f"{assistant_text}\n\n{global_ending_msg}"
+
     # 이번 턴 후 잔여 턴 (턴카운트가 방금 +1 됨)
     should_end = (remaining_turns - 1) <= 0
 
@@ -629,9 +646,9 @@ def talk_turn(req: TalkTurnRequest, db: Session = Depends(get_db)):
         "ui_text": assistant_text,
         "fallback_code": fallback_code,
         "policy_category": policy_category,
-        "should_end": should_end,
+        "should_end": should_end or is_global_last_turn,
         "warning_text": warning_text,
-        "global_ended": False,
+        "global_ended": is_global_last_turn,
     }
 
 

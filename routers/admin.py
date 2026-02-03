@@ -1493,7 +1493,7 @@ def admin_persona_get(db: Session = Depends(get_db)):
 def admin_quick_test(
     db: Session = Depends(get_db),
     visitor_name: str = Query("QuickTest", description="테스트 방문자 이름"),
-    answer_count: int = Query(5, ge=1, le=10, description="자동 제출할 답변 수"),
+    answer_count: int = Query(5, ge=1, le=365, description="자동 제출할 답변 수"),
 ):
     """
     Quick Test: 세션 시작 → 지정된 수의 답변 자동 제출 → 세션 종료

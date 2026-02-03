@@ -1054,7 +1054,7 @@ HTML = r"""
               </div>
               <div class="form-group" style="flex: 1;">
                 <label class="form-label">답변 수</label>
-                <input type="number" id="quickTestCount" value="5" min="1" max="10" />
+                <input type="number" id="quickTestCount" value="5" min="1" max="365" />
               </div>
               <div class="form-group" style="flex: 0;">
                 <label class="form-label">&nbsp;</label>

@@ -6,7 +6,7 @@ from fastapi import HTTPException
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from routers._store import LOCK, SESSIONS, GLOBAL_STATE
+from routers._store import LOCK, SESSIONS, GLOBAL_STATE, remove_session, clear_all_sessions, cleanup_ended_sessions
 from util.utils import now_kst_naive, iso, log_event
 from util.constants import ALLOWED_VALUE_KEYS, MAX_QUESTIONS
 
@@ -154,12 +154,11 @@ def end_session_core(db: Session, sid: int, reason: str) -> Dict[str, Any]:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"db error: {e}")
 
-    # 3) 메모리 캐시 반영
-    with LOCK:
-        sess = SESSIONS.get(sid)
-        if sess and sess.get("ended_at") is None:
-            sess["ended_at"] = ended_at
-            sess["end_reason"] = reason
+    # 3) 메모리 캐시에서 세션 제거 (메모리 누수 방지)
+    remove_session(sid)
+
+    # 주기적 정리: 세션이 많으면 오래된 종료 세션 정리
+    cleanup_ended_sessions(max_keep=100)
 
     # 이벤트 로깅
     from util.utils import log_event
@@ -239,6 +238,9 @@ def reset_cycle_core(db: Session, reason: str = "global_token_exhausted") -> Dic
             GLOBAL_STATE["values_summary"] = None
             GLOBAL_STATE["global_turn_count"] = 0
             GLOBAL_STATE["cycle_number"] = new_cycle
+
+        # 6) SESSIONS 메모리 캐시 정리 (메모리 누수 방지)
+        clear_all_sessions()
 
         db.commit()
 

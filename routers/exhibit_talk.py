@@ -331,9 +331,42 @@ def exhibit_talk_page():
       background: #333;
       border-radius: 3px;
     }
+
+    /* ==================
+       오프라인/에러 표시
+       ================== */
+    .connection-status {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      padding: 12px 20px;
+      background: #1a1a1a;
+      border-bottom: 1px solid #333;
+      color: #e57373;
+      font-size: 0.9rem;
+      text-align: center;
+      transform: translateY(-100%);
+      transition: transform 0.3s ease;
+      z-index: 200;
+    }
+    .connection-status.show {
+      transform: translateY(0);
+    }
+    .connection-status.reconnecting {
+      color: #ffb74d;
+    }
+    .connection-status.online {
+      color: #81c784;
+    }
   </style>
 </head>
 <body>
+  <!-- 연결 상태 표시 -->
+  <div class="connection-status" id="connectionStatus">
+    네트워크 연결이 끊어졌습니다
+  </div>
+
   <!-- 성격 표시 (오른쪽 상단) -->
   <div class="personality-panel" id="personalityPanel">
     <div class="personality-title">PSANO</div>
@@ -440,6 +473,85 @@ document.addEventListener('keydown', (e) => {
 });
 
 // ==================
+// 연결 상태 감지 & 서버 복구
+// ==================
+
+let isOnline = navigator.onLine;
+let serverHealthy = true;
+let healthCheckInterval = null;
+const HEALTH_CHECK_INTERVAL = 5000; // 5초마다 서버 체크
+
+function showConnectionStatus(message, className) {
+  const el = document.getElementById('connectionStatus');
+  el.textContent = message;
+  el.className = 'connection-status show ' + (className || '');
+}
+
+function hideConnectionStatus() {
+  document.getElementById('connectionStatus').classList.remove('show');
+}
+
+async function checkServerHealth() {
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3000);
+    const res = await fetch('/health', { signal: controller.signal });
+    clearTimeout(timeoutId);
+    return res.ok;
+  } catch (e) {
+    return false;
+  }
+}
+
+async function startHealthCheck() {
+  if (healthCheckInterval) return;
+
+  healthCheckInterval = setInterval(async () => {
+    const healthy = await checkServerHealth();
+
+    if (healthy && (!serverHealthy || !isOnline)) {
+      // 서버 복구됨
+      serverHealthy = true;
+      isOnline = true;
+      showConnectionStatus('연결이 복구되었습니다', 'online');
+      setTimeout(hideConnectionStatus, 2000);
+
+      // idle 상태면 다시 시작
+      if (document.getElementById('idleScreen').classList.contains('active')) {
+        startIdleLoop();
+        loadPersonality();
+      }
+    }
+
+    if (!healthy) {
+      serverHealthy = false;
+      showConnectionStatus('서버에 연결할 수 없습니다. 재연결 시도 중...', 'reconnecting');
+    }
+  }, HEALTH_CHECK_INTERVAL);
+}
+
+function stopHealthCheck() {
+  if (healthCheckInterval) {
+    clearInterval(healthCheckInterval);
+    healthCheckInterval = null;
+  }
+}
+
+// 브라우저 온라인/오프라인 이벤트
+window.addEventListener('online', () => {
+  isOnline = true;
+  showConnectionStatus('네트워크 연결됨. 서버 확인 중...', 'reconnecting');
+  startHealthCheck();
+});
+
+window.addEventListener('offline', () => {
+  isOnline = false;
+  serverHealthy = false;
+  showConnectionStatus('네트워크 연결이 끊어졌습니다', '');
+  startHealthCheck();
+});
+
+// ==================
 // 화면 전환
 // ==================
 
@@ -455,6 +567,16 @@ function showToast(msg) {
   toast.textContent = msg;
   toast.classList.add('show');
   setTimeout(() => toast.classList.remove('show'), 3000);
+}
+
+// 에러 표시 후 자동 복귀
+const ERROR_AUTO_RESTART_DELAY = 3000; // 3초 후 자동 복귀
+
+function showErrorAndRestart(msg) {
+  showToast(msg + ' (자동으로 처음으로 돌아갑니다)');
+  setTimeout(() => {
+    restart();
+  }, ERROR_AUTO_RESTART_DELAY);
 }
 
 // ==================
@@ -483,9 +605,13 @@ async function api(endpoint, options = {}) {
   } catch (e) {
     clearTimeout(timeoutId);
     if (e.name === 'AbortError') {
+      serverHealthy = false;
+      startHealthCheck();
       throw new Error('응답 시간이 초과되었습니다');
     }
     if (e.message === 'Failed to fetch' || e.message.includes('network')) {
+      serverHealthy = false;
+      startHealthCheck();
       throw new Error('네트워크 연결을 확인해주세요');
     }
     throw e;
@@ -739,9 +865,7 @@ async function startTalk() {
     document.getElementById('chatInput').focus();
 
   } catch (e) {
-    showToast(e.message);
-    startIdleLoop();
-    showScreen('idleScreen');
+    showErrorAndRestart(e.message);
   }
 }
 
@@ -824,8 +948,7 @@ async function sendMessage() {
 
   } catch (e) {
     showTyping(false);
-    showToast(e.message);
-    setInputEnabled(true);
+    showErrorAndRestart(e.message);
   }
 
   isProcessing = false;
@@ -910,8 +1033,25 @@ document.addEventListener('keydown', async (e) => {
 });
 
 // 페이지 로드
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
   requestWakeLock();
+
+  // 초기 연결 상태 확인
+  if (!navigator.onLine) {
+    isOnline = false;
+    serverHealthy = false;
+    showConnectionStatus('네트워크 연결이 끊어졌습니다', '');
+    startHealthCheck();
+  } else {
+    // 서버 상태 확인
+    const healthy = await checkServerHealth();
+    if (!healthy) {
+      serverHealthy = false;
+      showConnectionStatus('서버에 연결할 수 없습니다. 재연결 시도 중...', 'reconnecting');
+      startHealthCheck();
+    }
+  }
+
   loadPersonality();
   startIdleLoop();
 });

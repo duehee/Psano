@@ -5,12 +5,31 @@ from middleware.access_log import AccessLogMiddleware
 
 load_dotenv()
 
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from routers import health, session, question, answer, state, talk, ui, admin, persona, monologue, test, idle, monitor, exhibit, exhibit_talk
 
 setup_logging()
-app = FastAPI(title="Psano Backend", version="0.1.0")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """서버 시작/종료 시 실행되는 lifespan 이벤트"""
+    # Startup: DB에서 GLOBAL_STATE 로드
+    from routers._store import load_global_state_from_db
+    from util.utils import log_event
+
+    log_event("server_startup", message="Loading global state from DB...")
+    load_global_state_from_db()
+
+    yield
+
+    # Shutdown
+    log_event("server_shutdown", message="Server shutting down")
+
+
+app = FastAPI(title="Psano Backend", version="0.1.0", lifespan=lifespan)
 
 # CORS 설정 (TD, 브라우저 등에서 API 호출 허용)
 app.add_middleware(
