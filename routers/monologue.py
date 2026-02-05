@@ -206,22 +206,6 @@ def idle_monologue(req: MonologueRequest, db: Session = Depends(get_db)):
     )
 
 
-@router.get("", response_model=MonologueResponse)
-def idle_monologue_get(
-    model: str = "gpt-4o",
-    max_output_tokens: int | None = None,
-    answered_total_override: int | None = None,
-    db: Session = Depends(get_db)
-):
-    """GET /monologue - TD용 혼잣말 생성"""
-    return _idle_monologue_core(
-        db,
-        model=model,
-        max_output_tokens=max_output_tokens,
-        answered_total_override=answered_total_override,
-    )
-
-
 # -----------------------
 # Nudge (대화 중 혼잣말)
 # -----------------------
@@ -434,22 +418,4 @@ def talk_nudge(req: NudgeRequest, db: Session = Depends(get_db)):
         model=req.model,
         max_output_tokens=req.max_output_tokens,
         recent_messages=req.recent_messages,
-    )
-
-
-@router.get("/nudge", response_model=NudgeResponse)
-def talk_nudge_get(
-    session_id: int,
-    model: str = "gpt-4o",
-    max_output_tokens: int | None = None,
-    recent_messages: int | None = None,
-    db: Session = Depends(get_db)
-):
-    """GET /monologue/nudge - TD용 대화 중 nudge"""
-    return _talk_nudge_core(
-        db,
-        sid=session_id,
-        model=model,
-        max_output_tokens=max_output_tokens,
-        recent_messages=recent_messages,
     )

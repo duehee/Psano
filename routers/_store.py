@@ -41,7 +41,7 @@ def load_global_state_from_db():
 
         # psano_state에서 현재 상태 로드
         result = db.execute(text("""
-            SELECT current_phase, current_question, persona_prompt, global_turn_count
+            SELECT phase, current_question, persona_prompt, global_turn_count
             FROM psano_state
             WHERE id = 1
         """)).fetchone()

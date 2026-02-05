@@ -126,23 +126,11 @@ def start_session(req: SessionStartRequest, db: Session = Depends(get_db)):
     return _start_session_core(db, req.visitor_name)
 
 
-@router.get("/start", response_model=SessionStartResponse)
-def start_session_get(visitor_name: str | None = None, db: Session = Depends(get_db)):
-    """TD용 GET 엔드포인트 - Query 파라미터로 세션 시작"""
-    return _start_session_core(db, visitor_name)
-
-
 @router.post("/end", response_model=SessionEndResponse)
 def end_session(req: SessionEndRequest, db: Session = Depends(get_db)):
     sid = int(req.session_id)
     reason = (req.reason or "completed")
     return end_session_core(db, sid, reason)
-
-
-@router.get("/end", response_model=SessionEndResponse)
-def end_session_get(session_id: int, reason: str = "completed", db: Session = Depends(get_db)):
-    """TD용 GET 엔드포인트 - Query 파라미터로 세션 종료"""
-    return end_session_core(db, session_id, reason)
 
 @router.get("/{session_id}")
 def get_session(session_id: int, db: Session = Depends(get_db)):

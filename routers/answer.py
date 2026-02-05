@@ -312,19 +312,3 @@ def _post_answer_core(db: Session, sid: int, qid: int, choice: str):
 def post_answer(req: AnswerRequest, db: Session = Depends(get_db)):
     """POST /answer - 형성기 답변 제출"""
     return _post_answer_core(db, int(req.session_id), int(req.question_id), req.choice)
-
-
-@router.get("", response_model=AnswerResponse)
-def get_answer(
-    session_id: int,
-    question_id: int,
-    choice: str,
-    db: Session = Depends(get_db)
-):
-    """GET /answer - TD용 형성기 답변 제출"""
-    # choice 검증
-    choice = choice.upper()
-    if choice not in ("A", "B"):
-        from fastapi import HTTPException
-        raise HTTPException(status_code=400, detail="choice must be 'A' or 'B'")
-    return _post_answer_core(db, session_id, question_id, choice)
