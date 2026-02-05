@@ -52,6 +52,7 @@ class AdminProgressResponse(BaseModel):
     progress_ratio: float         # 0~1
     global_turn_count: int = 0    # 글로벌 대화 턴 카운트
     global_turn_max: int = 365    # 글로벌 최대 턴
+    cycle_number: int = 1         # 현재 사이클 번호
 
 class AdminResetRequest(BaseModel):
     reset_answers: bool = Field(default=False)
