@@ -10,7 +10,7 @@ logger = logging.getLogger("psano")
 from schemas.answer import AnswerRequest, AnswerResponse
 from services.llm_service import call_llm
 from util.utils import load_growth_stage, get_config, get_prompt
-from util.constants import ALLOWED_VALUE_KEYS, DEFAULT_SESSION_QUESTION_LIMIT, MAX_QUESTIONS
+from util.constants import ALLOWED_VALUE_KEYS, DEFAULT_SESSION_QUESTION_LIMIT
 
 router = APIRouter()
 

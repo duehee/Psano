@@ -72,7 +72,7 @@ def call_llm(
 
     for attempt in range(llm_retry_count):
         try:
-            t0 = time.perf_counter()  # ✅ 추가: 지연시간 측정
+            t0 = time.perf_counter()
 
             # GPT-5, o1, o3 모델은 max_completion_tokens 사용
             is_new_model = any(x in model for x in ['gpt-5', 'gpt-4.1', 'o1', 'o3'])

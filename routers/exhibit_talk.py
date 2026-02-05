@@ -359,9 +359,34 @@ def exhibit_talk_page():
     .connection-status.online {
       color: #81c784;
     }
+
+    /* 헬스 인디케이터 (왼쪽 상단 작은 점) */
+    .health-indicator {
+      position: fixed;
+      top: 12px;
+      left: 12px;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #4caf50;
+      opacity: 0.6;
+      z-index: 9999;
+      transition: background 0.3s, opacity 0.3s;
+    }
+    .health-indicator.error {
+      background: #f44336;
+      opacity: 0.8;
+    }
+    .health-indicator.warning {
+      background: #ff9800;
+      opacity: 0.7;
+    }
   </style>
 </head>
 <body>
+  <!-- 헬스 인디케이터 (운영자용) -->
+  <div class="health-indicator" id="healthIndicator" title="서버 상태: 정상"></div>
+
   <!-- 연결 상태 표시 -->
   <div class="connection-status" id="connectionStatus">
     네트워크 연결이 끊어졌습니다
@@ -491,14 +516,28 @@ function hideConnectionStatus() {
   document.getElementById('connectionStatus').classList.remove('show');
 }
 
+function updateHealthIndicator(healthy) {
+  const indicator = document.getElementById('healthIndicator');
+  if (healthy) {
+    indicator.className = 'health-indicator';
+    indicator.title = '서버 상태: 정상';
+  } else {
+    indicator.className = 'health-indicator error';
+    indicator.title = '서버 상태: 연결 끊김';
+  }
+}
+
 async function checkServerHealth() {
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 3000);
     const res = await fetch('/health', { signal: controller.signal });
     clearTimeout(timeoutId);
-    return res.ok;
+    const healthy = res.ok;
+    updateHealthIndicator(healthy);
+    return healthy;
   } catch (e) {
+    updateHealthIndicator(false);
     return false;
   }
 }

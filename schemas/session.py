@@ -5,7 +5,7 @@ from .common import Phase
 EndReason = Literal["completed", "max_reached", "timeout", "admin", "error"]
 
 class SessionStartRequest(BaseModel):
-    visitor_name: Optional[str] = Field(None, max_length=100)
+    visitor_name: Optional[str] = Field(None, max_length=12)
 
 class SessionStartResponse(BaseModel):
     session_id: int
