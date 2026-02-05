@@ -2752,12 +2752,28 @@ HTML = r"""
         <p>사노는 관람객의 선택(A/B 질문)을 통해 성격이 형성되고, 이후 대화를 나눌 수 있는 AI 캐릭터입니다.</p>
       </div>
       <div class="help-section">
-        <h4>🔄 기본 흐름</h4>
+        <h4>🖥️ 전시 페이지</h4>
         <ul>
-          <li><strong>Session Start</strong> → 방문자 이름 입력 후 세션 시작</li>
-          <li><strong>Formation</strong> → A/B 질문 5개 응답 (성격 형성)</li>
-          <li><strong>Session End</strong> → 세션 종료 (personality 반영)</li>
-          <li><strong>Talk</strong> → 365문항 완료 후 대화 가능</li>
+          <li><strong>/exhibit_teach</strong> → 형성기 전시 페이지 (A/B 질문)</li>
+          <li><strong>/exhibit_talk</strong> → 대화기 전시 페이지 (자유 대화)</li>
+        </ul>
+        <p style="color: var(--muted); font-size: 12px;">* F11로 풀스크린 전환 가능</p>
+      </div>
+      <div class="help-section">
+        <h4>🔄 전체 사이클 흐름</h4>
+        <ul>
+          <li><strong>형성기</strong> → 365문항 완료 시 페르소나 자동 생성</li>
+          <li><strong>대화기</strong> → 글로벌 365턴 대화 가능</li>
+          <li><strong>사이클 리셋</strong> → 365턴 소진 시 형성기로 자동 전환 (personality 초기화)</li>
+        </ul>
+        <p style="color: var(--muted); font-size: 12px;">* 세션당 형성기 5문항, 대화기 50턴 제한</p>
+      </div>
+      <div class="help-section">
+        <h4>👤 닉네임 규칙</h4>
+        <ul>
+          <li>최대 12자</li>
+          <li>한글, 영문, 숫자만 허용 (특수문자/공백 불가)</li>
+          <li>빈 이름도 허용 (익명)</li>
         </ul>
       </div>
     `,

@@ -508,7 +508,7 @@ def exhibit_page():
     <div class="screen name-screen" id="nameScreen">
       <div class="name-prompt">이름을 알려줄래?</div>
       <div class="name-input-area">
-        <input type="text" class="name-input" id="nameInput" placeholder="이름" maxlength="20">
+        <input type="text" class="name-input" id="nameInput" placeholder="이름" maxlength="12">
         <div class="name-hint">엔터를 누르면 시작됩니다</div>
       </div>
     </div>
@@ -1070,6 +1070,19 @@ document.addEventListener('keydown', (e) => {
 document.getElementById('nameInput').addEventListener('keypress', (e) => {
   if (e.key === 'Enter') {
     const name = e.target.value.trim();
+    // 빈 이름은 허용
+    if (name.length > 0) {
+      // 12자 초과 체크
+      if (name.length > 12) {
+        showToast('이름은 12자 이내로 입력해주세요');
+        return;
+      }
+      // 한글/영문/숫자만 허용 (특수문자, 공백 불가)
+      if (!/^[가-힣a-zA-Z0-9]+$/.test(name)) {
+        showToast('이름은 한글, 영문, 숫자만 사용할 수 있어요');
+        return;
+      }
+    }
     startSession(name);
   }
 });
